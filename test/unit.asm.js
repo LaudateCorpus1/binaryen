@@ -227,6 +227,26 @@ function asm(global, env, buffer) {
    return 0;
   }
 
+  function forgetMe() {
+    123.456;
+  }
+  function exportMe() {
+    -3.14159;
+  }
+
+  function zeroInit(x) {
+    x = x | 0;
+    var y = 0; // reusing this with x is dangerous - x has a value, and y needs to start at 0!
+    if (lb(0) | 0) {
+      if (lb(1) | 0) y = 3;
+    } else {
+      y = 3;
+    }
+    if ((y | 0) == 3) {
+      lb(2) | 0;
+    }
+  }
+
   function z() {
   }
   function w() {
@@ -236,6 +256,6 @@ function asm(global, env, buffer) {
   var FUNCTION_TABLE_b = [ w, w, importedDoubles, w ];
   var FUNCTION_TABLE_c = [ z, cneg ];
 
-  return { big_negative: big_negative };
+  return { big_negative: big_negative, pick: forgetMe, pick: exportMe };
 }
 

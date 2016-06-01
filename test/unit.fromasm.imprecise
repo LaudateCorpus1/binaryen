@@ -9,6 +9,7 @@
   (import $h "env" "h" (param i32))
   (import $f64-rem "asm2wasm" "f64-rem" (param f64 f64) (result f64))
   (export "big_negative" $big_negative)
+  (export "pick" $big_negative)
   (table $big_negative $big_negative $big_negative $big_negative $big_negative $big_negative $importedDoubles $big_negative $big_negative $cneg)
   (func $big_negative
     (nop)
@@ -415,5 +416,33 @@
       )
     )
     (i32.const 0)
+  )
+  (func $zeroInit (param $0 i32)
+    (local $1 i32)
+    (if
+      (call $lb
+        (i32.const 0)
+      )
+      (if
+        (call $lb
+          (i32.const 1)
+        )
+        (set_local $1
+          (i32.const 3)
+        )
+      )
+      (set_local $1
+        (i32.const 3)
+      )
+    )
+    (if
+      (i32.eq
+        (get_local $1)
+        (i32.const 3)
+      )
+      (call $lb
+        (i32.const 2)
+      )
+    )
   )
 )
