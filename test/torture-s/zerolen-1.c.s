@@ -26,7 +26,7 @@ set:                                    # @set
 # BB#0:                                 # %entry
 	i32.const	$push0=, 1
 	i32.store16	$drop=, 0($0):p2align=0, $pop0
-	return
+                                        # fallthrough-return
 	.endfunc
 .Lfunc_end1:
 	.size	set, .Lfunc_end1-set
@@ -41,3 +41,4 @@ entry:
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

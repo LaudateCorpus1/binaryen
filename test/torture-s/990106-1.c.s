@@ -10,7 +10,7 @@ foo:                                    # @foo
 # BB#0:                                 # %entry
 	i32.const	$push1=, 97
 	i32.store8	$push0=, 0($0), $pop1
-	return  	$pop0
+                                        # fallthrough-return: $pop0
 	.endfunc
 .Lfunc_end0:
 	.size	foo, .Lfunc_end0-foo
@@ -31,3 +31,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

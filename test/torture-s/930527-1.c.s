@@ -12,7 +12,7 @@ f:                                      # @f
 	i32.shr_u	$push1=, $0, $pop0
 	i32.const	$push2=, 175
 	i32.xor 	$push3=, $pop1, $pop2
-	return  	$pop3
+                                        # fallthrough-return: $pop3
 	.endfunc
 .Lfunc_end0:
 	.size	f, .Lfunc_end0-f
@@ -33,3 +33,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

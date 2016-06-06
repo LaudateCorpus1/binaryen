@@ -7,7 +7,7 @@
 bar:                                    # @bar
 	.param  	i32
 # BB#0:                                 # %entry
-	return
+                                        # fallthrough-return
 	.endfunc
 .Lfunc_end0:
 	.size	bar, .Lfunc_end0-bar
@@ -19,7 +19,7 @@ bar:                                    # @bar
 baz:                                    # @baz
 	.param  	i32
 # BB#0:                                 # %entry
-	return
+                                        # fallthrough-return
 	.endfunc
 .Lfunc_end1:
 	.size	baz, .Lfunc_end1-baz
@@ -40,3 +40,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

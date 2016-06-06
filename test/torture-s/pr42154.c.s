@@ -33,10 +33,11 @@ main:                                   # @main
 	i32.const	$push0=, 97
 	call    	foo@FUNCTION, $pop0
 	i32.const	$push1=, 0
-	return  	$pop1
+                                        # fallthrough-return: $pop1
 	.endfunc
 .Lfunc_end1:
 	.size	main, .Lfunc_end1-main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void

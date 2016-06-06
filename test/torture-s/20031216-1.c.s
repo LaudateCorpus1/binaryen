@@ -29,7 +29,7 @@ ReadNumber:                             # @ReadNumber
 	.result 	i32
 # BB#0:                                 # %entry
 	i32.const	$push0=, 10092544
-	return  	$pop0
+                                        # fallthrough-return: $pop0
 	.endfunc
 .Lfunc_end1:
 	.size	ReadNumber, .Lfunc_end1-ReadNumber
@@ -42,10 +42,11 @@ main:                                   # @main
 	.result 	i32
 # BB#0:                                 # %entry
 	i32.const	$push0=, 0
-	return  	$pop0
+                                        # fallthrough-return: $pop0
 	.endfunc
 .Lfunc_end2:
 	.size	main, .Lfunc_end2-main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void

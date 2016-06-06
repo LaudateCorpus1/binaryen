@@ -8,7 +8,8 @@ blah:                                   # @blah
 	.result 	i32
 	.local  	i32
 # BB#0:                                 # %entry
-	return  	$0
+	copy_local	$push0=, $0
+                                        # fallthrough-return: $pop0
 	.endfunc
 .Lfunc_end0:
 	.size	blah, .Lfunc_end0-blah
@@ -59,3 +60,6 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void
+	.functype	malloc, i32, i32
+	.functype	exit, void, i32

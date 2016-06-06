@@ -9,20 +9,20 @@ sreal_compare:                          # @sreal_compare
 	.result 	i32
 	.local  	i32, i32, i32
 # BB#0:                                 # %entry
-	i32.const	$2=, 1
+	i32.const	$4=, 1
 	block
 	i32.load	$push9=, 4($0)
-	tee_local	$push8=, $4=, $pop9
+	tee_local	$push8=, $2=, $pop9
 	i32.load	$push7=, 4($1)
 	tee_local	$push6=, $3=, $pop7
 	i32.gt_s	$push0=, $pop8, $pop6
 	br_if   	0, $pop0        # 0: down to label0
 # BB#1:                                 # %if.end
-	i32.const	$2=, -1
-	i32.lt_s	$push1=, $4, $3
+	i32.const	$4=, -1
+	i32.lt_s	$push1=, $2, $3
 	br_if   	0, $pop1        # 0: down to label0
 # BB#2:                                 # %if.end6
-	i32.const	$2=, 1
+	i32.const	$4=, 1
 	i32.load	$push13=, 0($0)
 	tee_local	$push12=, $0=, $pop13
 	i32.load	$push11=, 0($1)
@@ -33,10 +33,11 @@ sreal_compare:                          # @sreal_compare
 	i32.const	$push5=, -1
 	i32.const	$push4=, 0
 	i32.lt_u	$push3=, $0, $1
-	i32.select	$2=, $pop5, $pop4, $pop3
+	i32.select	$4=, $pop5, $pop4, $pop3
 .LBB0_4:                                # %return
 	end_block                       # label0:
-	return  	$2
+	copy_local	$push14=, $4
+                                        # fallthrough-return: $pop14
 	.endfunc
 .Lfunc_end0:
 	.size	sreal_compare, .Lfunc_end0-sreal_compare
@@ -51,27 +52,27 @@ main:                                   # @main
 # BB#0:                                 # %entry
 	i32.const	$6=, 0
 	i32.const	$push47=, 0
-	i32.load	$0=, a+4($pop47)
+	i32.load	$5=, a+16($pop47)
 	i32.const	$push46=, 0
-	i32.load	$1=, a($pop46)
+	i32.load	$4=, a+20($pop46)
 	i32.const	$push45=, 0
-	i32.load	$2=, a+12($pop45)
+	i32.load	$3=, a+8($pop45)
 	i32.const	$push44=, 0
-	i32.load	$3=, a+8($pop44)
+	i32.load	$2=, a+12($pop44)
 	i32.const	$push43=, 0
-	i32.load	$4=, a+20($pop43)
+	i32.load	$1=, a($pop43)
 	i32.const	$push42=, 0
-	i32.load	$5=, a+16($pop42)
+	i32.load	$0=, a+4($pop42)
 .LBB1_1:                                # %if.end
                                         # =>This Inner Loop Header: Depth=1
 	loop                            # label1:
 	i32.const	$push52=, 3
 	i32.shl 	$push51=, $6, $pop52
-	tee_local	$push50=, $8=, $pop51
-	i32.const	$push49=, a+4
-	i32.add 	$7=, $pop50, $pop49
-	i32.const	$push48=, a
-	i32.add 	$8=, $8, $pop48
+	tee_local	$push50=, $7=, $pop51
+	i32.const	$push49=, a
+	i32.add 	$8=, $pop50, $pop49
+	i32.const	$push48=, a+4
+	i32.add 	$7=, $7, $pop48
 	block
 	block
 	block
@@ -81,8 +82,8 @@ main:                                   # @main
 	block
 	block
 	block
-	i32.eqz 	$push72=, $6
-	br_if   	0, $pop72       # 0: down to label11
+	i32.eqz 	$push74=, $6
+	br_if   	0, $pop74       # 0: down to label11
 # BB#2:                                 # %if.end14
                                         #   in Loop: Header=BB1_1 Depth=1
 	i32.const	$push53=, 1
@@ -209,25 +210,25 @@ main:                                   # @main
 .LBB1_24:                               # %if.end14.2
                                         #   in Loop: Header=BB1_1 Depth=1
 	end_block                       # label7:
-	i32.const	$push67=, 3
-	i32.lt_s	$push12=, $6, $pop67
+	i32.const	$push69=, 3
+	i32.lt_s	$push12=, $6, $pop69
 	br_if   	3, $pop12       # 3: down to label3
 # BB#25:                                # %land.lhs.true16.2
-	i32.load	$push71=, 0($7)
-	tee_local	$push70=, $6=, $pop71
+	i32.load	$push73=, 0($7)
+	tee_local	$push72=, $6=, $pop73
 	i32.const	$push13=, 0
-	i32.load	$push69=, a+20($pop13)
-	tee_local	$push68=, $7=, $pop69
-	i32.gt_s	$push14=, $pop70, $pop68
+	i32.load	$push71=, a+20($pop13)
+	tee_local	$push70=, $7=, $pop71
+	i32.gt_s	$push14=, $pop72, $pop70
 	br_if   	5, $pop14       # 5: down to label2
 # BB#26:                                # %if.end.i45.2
 	i32.lt_s	$push15=, $6, $7
 	br_if   	2, $pop15       # 2: down to label4
 # BB#27:                                # %if.end6.i49.2
-	i32.load	$push16=, 0($8)
-	i32.const	$push17=, 0
-	i32.load	$push18=, a+16($pop17)
-	i32.le_u	$push19=, $pop16, $pop18
+	i32.load	$push18=, 0($8)
+	i32.const	$push16=, 0
+	i32.load	$push17=, a+16($pop16)
+	i32.le_u	$push19=, $pop18, $pop17
 	br_if   	2, $pop19       # 2: down to label4
 	br      	5               # 5: down to label2
 .LBB1_28:                               # %if.then
@@ -245,15 +246,16 @@ main:                                   # @main
 .LBB1_31:                               # %for.inc.2
                                         #   in Loop: Header=BB1_1 Depth=1
 	end_block                       # label3:
-	i32.const	$push66=, 1
-	i32.add 	$6=, $6, $pop66
+	i32.const	$push68=, 1
+	i32.add 	$push67=, $6, $pop68
+	tee_local	$push66=, $6=, $pop67
 	i32.const	$push65=, 4
-	i32.lt_s	$push40=, $6, $pop65
+	i32.lt_s	$push40=, $pop66, $pop65
 	br_if   	0, $pop40       # 0: up to label1
 .LBB1_32:                               # %for.end25
 	end_loop                        # label2:
 	i32.const	$push41=, 0
-	return  	$pop41
+                                        # fallthrough-return: $pop41
 	.endfunc
 .Lfunc_end1:
 	.size	main, .Lfunc_end1-main
@@ -275,3 +277,4 @@ a:
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void

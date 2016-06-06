@@ -11,7 +11,7 @@ acc_a:                                  # @acc_a
 	i32.const	$push0=, a-2000000000
 	i32.add 	$push1=, $0, $pop0
 	i32.load8_s	$push2=, 0($pop1)
-	return  	$pop2
+                                        # fallthrough-return: $pop2
 	.endfunc
 .Lfunc_end0:
 	.size	acc_a, .Lfunc_end0-acc_a
@@ -51,3 +51,5 @@ a:
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void
+	.functype	exit, void, i32

@@ -14,7 +14,7 @@ foo:                                    # @foo
 	i32.or  	$push3=, $pop1, $pop2
 	i32.store	$drop=, x($pop0), $pop3
 	i32.const	$push4=, 1
-	return  	$pop4
+                                        # fallthrough-return: $pop4
 	.endfunc
 .Lfunc_end0:
 	.size	foo, .Lfunc_end0-foo
@@ -58,3 +58,4 @@ x:
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void

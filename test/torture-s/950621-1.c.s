@@ -24,7 +24,8 @@ f:                                      # @f
 	i32.eq  	$1=, $pop2, $pop4
 .LBB0_3:                                # %land.end
 	end_block                       # label0:
-	return  	$1
+	copy_local	$push6=, $1
+                                        # fallthrough-return: $pop6
 	.endfunc
 .Lfunc_end0:
 	.size	f, .Lfunc_end0-f
@@ -45,3 +46,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

@@ -12,7 +12,7 @@ f:                                      # @f
 	i64.add 	$push1=, $0, $pop0
 	i64.const	$push2=, 6442450943
 	i64.gt_u	$push3=, $pop1, $pop2
-	return  	$pop3
+                                        # fallthrough-return: $pop3
 	.endfunc
 .Lfunc_end0:
 	.size	f, .Lfunc_end0-f
@@ -33,3 +33,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

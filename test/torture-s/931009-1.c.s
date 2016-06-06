@@ -22,10 +22,12 @@ f:                                      # @f
 	.result 	i32
 	.local  	i32
 # BB#0:                                 # %if.end
-	return  	$0
+	copy_local	$push0=, $0
+                                        # fallthrough-return: $pop0
 	.endfunc
 .Lfunc_end1:
 	.size	f, .Lfunc_end1-f
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

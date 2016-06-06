@@ -41,10 +41,12 @@ wwrite:                                 # @wwrite
 	i32.const	$1=, 123
 .LBB1_3:                                # %return
 	end_block                       # label0:
-	return  	$1
+	copy_local	$push6=, $1
+                                        # fallthrough-return: $pop6
 	.endfunc
 .Lfunc_end1:
 	.size	wwrite, .Lfunc_end1-wwrite
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

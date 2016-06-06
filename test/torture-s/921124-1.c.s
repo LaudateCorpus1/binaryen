@@ -8,7 +8,8 @@ f:                                      # @f
 	.param  	i32, f64, f64, f64
 	.result 	i32
 # BB#0:                                 # %entry
-	return  	$0
+	copy_local	$push0=, $0
+                                        # fallthrough-return: $pop0
 	.endfunc
 .Lfunc_end0:
 	.size	f, .Lfunc_end0-f
@@ -63,3 +64,5 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void
+	.functype	exit, void, i32

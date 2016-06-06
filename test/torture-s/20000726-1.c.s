@@ -23,10 +23,11 @@ adjust_xy:                              # @adjust_xy
 # BB#0:                                 # %entry
 	i32.const	$push0=, 1
 	i32.store16	$drop=, 0($0), $pop0
-	return
+                                        # fallthrough-return
 	.endfunc
 .Lfunc_end1:
 	.size	adjust_xy, .Lfunc_end1-adjust_xy
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

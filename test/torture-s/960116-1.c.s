@@ -23,7 +23,8 @@ f:                                      # @f
 	i32.const	$1=, 0
 .LBB0_3:                                # %return
 	end_block                       # label0:
-	return  	$1
+	copy_local	$push3=, $1
+                                        # fallthrough-return: $pop3
 	.endfunc
 .Lfunc_end0:
 	.size	f, .Lfunc_end0-f
@@ -44,3 +45,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

@@ -12,7 +12,7 @@ not_fabs:                               # @not_fabs
 	f64.const	$push0=, 0x0p0
 	f64.ge  	$push1=, $0, $pop0
 	f64.select	$push3=, $0, $pop2, $pop1
-	return  	$pop3
+                                        # fallthrough-return: $pop3
 	.endfunc
 .Lfunc_end0:
 	.size	not_fabs, .Lfunc_end0-not_fabs
@@ -44,3 +44,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void

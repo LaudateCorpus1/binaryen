@@ -7,7 +7,7 @@
 dummy:                                  # @dummy
 	.param  	i32, i32
 # BB#0:                                 # %entry
-	return
+                                        # fallthrough-return
 	.endfunc
 .Lfunc_end0:
 	.size	dummy, .Lfunc_end0-dummy
@@ -74,3 +74,5 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void
+	.functype	exit, void, i32

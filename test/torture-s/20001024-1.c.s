@@ -42,7 +42,7 @@ bar:                                    # @bar
 	.type	foo,@function
 foo:                                    # @foo
 # BB#0:                                 # %bar.exit
-	return
+                                        # fallthrough-return
 	.endfunc
 .Lfunc_end1:
 	.size	foo, .Lfunc_end1-foo
@@ -63,3 +63,5 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	abort, void
+	.functype	exit, void, i32

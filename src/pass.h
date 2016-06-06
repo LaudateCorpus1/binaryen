@@ -89,7 +89,7 @@ struct PassRunner {
   }
 
   template<class P, class Arg>
-  void add(Arg& arg){
+  void add(Arg arg){
     passes.push_back(new P(arg));
   }
 
@@ -97,13 +97,28 @@ struct PassRunner {
   // what -O does.
   void addDefaultOptimizationPasses();
 
+  // Adds the default optimization passes that work on
+  // individual functions.
+  void addDefaultFunctionOptimizationPasses();
+
+  // Adds the default optimization passes that work on
+  // entire modules as a whole.
+  void addDefaultGlobalOptimizationPasses();
+
+  // Run the passes on the module
   void run();
+
+  // Run the passes on a specific function
+  void runFunction(Function* func);
 
   // Get the last pass that was already executed of a certain type.
   template<class P>
   P* getLast();
 
   ~PassRunner();
+
+private:
+  void runPassOnFunction(Pass* pass, Function* func);
 };
 
 //
@@ -112,11 +127,36 @@ struct PassRunner {
 class Pass {
 public:
   virtual ~Pass() {};
+
   // Override this to perform preparation work before the pass runs.
   virtual void prepare(PassRunner* runner, Module* module) {}
   virtual void run(PassRunner* runner, Module* module) = 0;
   // Override this to perform finalization work after the pass runs.
   virtual void finalize(PassRunner* runner, Module* module) {}
+
+  // Run on a single function. This has no prepare/finalize calls.
+  virtual void runFunction(PassRunner* runner, Module* module, Function* function) {
+    WASM_UNREACHABLE(); // by default, passes cannot be run this way
+  }
+
+  // Function parallelism. By default, passes are not run in parallel, but you
+  // can override this method to say that functions are parallelizable. This
+  // should always be safe *unless* you do something in the pass that makes it
+  // not thread-safe; in other words, the Module and Function objects and
+  // so forth are set up so that Functions can be processed in parallel, so
+  // if you do not ad global state that could be raced on, your pass could be
+  // function-parallel.
+  //
+  // Function-parallel passes create an instance of the Walker class per function.
+  // That means that you can't rely on Walker object properties to persist across
+  // your functions, and you can't expect a new object to be created for each
+  // function either (which could be very inefficient).
+  virtual bool isFunctionParallel() { return false; }
+
+  // This method is used to create instances per function for a function-parallel
+  // pass. You may need to override this if you subclass a Walker, as otherwise
+  // this will create the parent class.
+  virtual Pass* create() { WASM_UNREACHABLE(); }
 
   std::string name;
 
@@ -137,6 +177,11 @@ public:
     prepare(runner, module);
     WalkerType::walkModule(module);
     finalize(runner, module);
+  }
+
+  void runFunction(PassRunner* runner, Module* module, Function* func) override {
+    WalkerType::setModule(module);
+    WalkerType::walkFunction(func);
   }
 };
 
@@ -174,7 +219,7 @@ protected:
 
 public:
   Printer() : o(std::cout) {}
-  Printer(std::ostream& o) : o(o) {}
+  Printer(std::ostream* o) : o(*o) {}
 
   void run(PassRunner* runner, Module* module) override;
 };

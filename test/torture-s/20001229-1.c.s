@@ -7,7 +7,7 @@
 foo:                                    # @foo
 	.param  	i32, i32
 # BB#0:                                 # %entry
-	return
+                                        # fallthrough-return
 	.endfunc
 .Lfunc_end0:
 	.size	foo, .Lfunc_end0-foo
@@ -18,7 +18,7 @@ foo:                                    # @foo
 	.type	showinfo,@function
 showinfo:                               # @showinfo
 # BB#0:                                 # %entry
-	return
+                                        # fallthrough-return
 	.endfunc
 .Lfunc_end1:
 	.size	showinfo, .Lfunc_end1-showinfo
@@ -39,3 +39,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

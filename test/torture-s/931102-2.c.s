@@ -33,7 +33,8 @@ f:                                      # @f
 .LBB0_3:                                # %while.end
 	end_loop                        # label2:
 	end_block                       # label0:
-	return  	$1
+	copy_local	$push11=, $1
+                                        # fallthrough-return: $pop11
 	.endfunc
 .Lfunc_end0:
 	.size	f, .Lfunc_end0-f
@@ -54,3 +55,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

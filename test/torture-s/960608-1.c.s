@@ -11,7 +11,7 @@ foo:                                    # @foo
 	i32.load8_u	$push0=, 0($0)
 	i32.const	$push1=, 206
 	i32.ne  	$push2=, $pop0, $pop1
-	return  	$pop2
+                                        # fallthrough-return: $pop2
 	.endfunc
 .Lfunc_end0:
 	.size	foo, .Lfunc_end0-foo
@@ -32,3 +32,4 @@ main:                                   # @main
 
 
 	.ident	"clang version 3.9.0 "
+	.functype	exit, void, i32

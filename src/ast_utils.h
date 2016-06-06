@@ -169,16 +169,16 @@ struct EffectAnalyzer : public PostWalker<EffectAnalyzer, Visitor<EffectAnalyzer
 
 // Meausure the size of an AST
 struct Measurer : public PostWalker<Measurer, UnifiedExpressionVisitor<Measurer>> {
-  size_t size = 0;
+  Index size = 0;
 
   void visitExpression(Expression* curr) {
     size++;
   }
 
-  static bool measure(Expression* tree) {
+  static Index measure(Expression* tree) {
     Measurer measurer;
     measurer.walk(tree);
-    return !!measurer.size;
+    return measurer.size;
   }
 };
 
@@ -539,7 +539,7 @@ struct ExpressionAnalyzer {
         }
         case Expression::Id::CallIndirectId: {
           PUSH(CallIndirect, target);
-          HASH_PTR(CallIndirect, fullType);
+          HASH_NAME(CallIndirect, fullType);
           HASH(CallIndirect, operands.size());
           for (Index i = 0; i < curr->cast<CallIndirect>()->operands.size(); i++) {
             PUSH(CallIndirect, operands[i]);
