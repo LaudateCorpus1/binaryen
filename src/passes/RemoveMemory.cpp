@@ -15,26 +15,22 @@
  */
 
 //
-// Write out the name list of the module, similar to `nm`.
+// Removeds memory segments, leaving only code in the module.
 //
 
-#include "wasm.h"
-#include "pass.h"
-#include "ast_utils.h"
+#include <wasm.h>
+#include <pass.h>
 
 namespace wasm {
 
-struct NameList : public Pass {
+struct RemoveMemory : public Pass {
   void run(PassRunner* runner, Module* module) override {
-    for (auto& func : module->functions) {
-      std::cout << "    " << func->name << " : " << Measurer::measure(func->body) << '\n';
-    }
+    module->memory.segments.clear();
   }
 };
 
-Pass *createNameListPass() {
-  return new NameList();
+Pass *createRemoveMemoryPass() {
+  return new RemoveMemory();
 }
 
 } // namespace wasm
-

@@ -132,11 +132,34 @@ except:
 
 # utilities
 
-def run_command(cmd, stderr=None):
+def delete_from_orbit(filename): # removes a file if it exists, using any and all ways of doing so
+  try:
+    os.unlink(filename)
+  except:
+    pass
+  if not os.path.exists(filename): return
+  try:
+    shutil.rmtree(filename, ignore_errors=True)
+  except:
+    pass
+  if not os.path.exists(filename): return
+  try:
+    os.chmod(filename, os.stat(filename).st_mode | stat.S_IWRITE)
+    def remove_readonly_and_try_again(func, path, exc_info):
+      if not (os.stat(path).st_mode & stat.S_IWRITE):
+        os.chmod(path, os.stat(path).st_mode | stat.S_IWRITE)
+        func(path)
+      else:
+        raise
+    shutil.rmtree(filename, onerror=remove_readonly_and_try_again)
+  except:
+    pass
+
+def run_command(cmd, expected_status=0, stderr=None):
   print 'executing: ', ' '.join(cmd)
   proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr)
   out, err = proc.communicate()
-  if proc.returncode != 0: raise Exception(('run_command failed', err))
+  if proc.returncode != expected_status: raise Exception(('run_command failed', err))
   return out
 
 def fail(actual, expected):
@@ -278,6 +301,14 @@ for e in executables:
   assert e in err, 'Expected help to contain program name, got:\n%s' % err
   assert len(err.split('\n')) > 8, 'Expected some help, got:\n%s' % err
 
+print '\n[ checking binaryen-shell -o notation... ]\n'
+
+wast = os.path.join('test', 'hello_world.wast')
+delete_from_orbit('a.wast')
+cmd = [os.path.join('bin', 'binaryen-shell'), wast, '-o', 'a.wast']
+run_command(cmd)
+fail_if_not_identical(open('a.wast').read(), open(wast).read())
+
 print '\n[ checking binaryen-shell passes... ]\n'
 
 for t in sorted(os.listdir(os.path.join('test', 'passes'))):
@@ -412,7 +443,7 @@ for t in spec_tests:
     try:
       actual = run_spec_test(wast)
     except Exception, e:
-      if 'wasm-validator error' in str(e) and '.fail.' in t:
+      if ('wasm-validator error' in str(e) or 'parse exception' in str(e)) and '.fail.' in t:
         print '<< test failed as expected >>'
         continue # don't try all the binary format stuff TODO
       else:
@@ -544,6 +575,19 @@ output = run_command(cmd)
 # bar should be linked from the archive
 fail_if_not_contained(output, '(func $bar')
 
+print '\n[ running validation tests... ]\n'
+wasm_as = os.path.join('bin', 'wasm-as')
+# Ensure the tests validate by default
+cmd = [wasm_as, os.path.join('test', 'validator', 'invalid_export.wast')]
+run_command(cmd)
+cmd = [wasm_as, os.path.join('test', 'validator', 'invalid_import.wast')]
+run_command(cmd)
+cmd = [wasm_as, '--validate=web', os.path.join('test', 'validator', 'invalid_export.wast')]
+run_command(cmd, expected_status=1)
+cmd = [wasm_as, '--validate=web', os.path.join('test', 'validator', 'invalid_import.wast')]
+run_command(cmd, expected_status=1)
+cmd = [wasm_as, '--validate=none', os.path.join('test', 'validator', 'invalid_return.wast')]
+run_command(cmd)
 
 if torture:
 
@@ -621,12 +665,7 @@ print '\n[ checking example testcases... ]\n'
 for t in sorted(os.listdir(os.path.join('test', 'example'))):
   output_file = os.path.join('bin', 'example')
   cmd = ['-Isrc', '-g', '-lasmjs', '-lsupport', '-Llib/.', '-pthread', '-o', output_file]
-  if t.endswith('.cpp'):
-    cmd = [os.path.join('test', 'example', t),
-           os.path.join('src', 'passes', 'pass.cpp'),
-           os.path.join('src', 'wasm.cpp'),
-           os.path.join('src', 'passes', 'Print.cpp')] + cmd
-  elif t.endswith('.c'):
+  if t.endswith('.c'):
     # build the C file separately
     extra = [os.environ.get('CC') or 'gcc',
              os.path.join('test', 'example', t), '-c', '-o', 'example.o',

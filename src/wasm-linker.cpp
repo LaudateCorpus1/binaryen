@@ -135,7 +135,7 @@ void Linker::layout() {
 
     if (relocation->kind == LinkerObject::Relocation::kData) {
       const auto& symbolAddress = staticAddresses.find(name);
-      assert(symbolAddress != staticAddresses.end());
+      if (symbolAddress == staticAddresses.end()) Fatal() << "Unknown relocation: " << name << '\n';
       *(relocation->data) = symbolAddress->second + relocation->addend;
       if (debug) std::cerr << "  ==> " << *(relocation->data) << '\n';
     } else {
@@ -357,12 +357,21 @@ void Linker::emscriptenGlue(std::ostream& o) {
   o << " }\n";
 }
 
+bool hasI64ResultOrParam(FunctionType* ft) {
+  if (ft->result == i64) return true;
+  for (auto ty : ft->params) {
+    if (ty == i64) return true;
+  }
+  return false;
+}
+
 void Linker::makeDynCallThunks() {
   std::unordered_set<std::string> sigs;
   wasm::Builder wasmBuilder(out.wasm);
   for (const auto& indirectFunc : out.wasm.table.names) {
     std::string sig(getSig(out.wasm.getFunction(indirectFunc)));
     auto* funcType = ensureFunctionType(sig, &out.wasm);
+    if (hasI64ResultOrParam(funcType)) continue; // Can't export i64s on the web.
     if (!sigs.insert(sig).second) continue; // Sig is already in the set
     std::vector<NameType> params;
     params.emplace_back("fptr", i32); // function pointer param
@@ -384,6 +393,7 @@ void Linker::makeDynCallThunks() {
 Function* Linker::getImportThunk(Name name, const FunctionType* funcType) {
   Name thunkName = std::string("__importThunk_") + name.c_str();
   if (Function* thunk = out.wasm.checkFunction(thunkName)) return thunk;
+  ensureImport(name, getSig(funcType));
   wasm::Builder wasmBuilder(out.wasm);
   std::vector<NameType> params;
   Index p = 0;
@@ -396,6 +406,5 @@ Function* Linker::getImportThunk(Name name, const FunctionType* funcType) {
   Expression* call = wasmBuilder.makeCallImport(name, args);
   f->body = call;
   out.wasm.addFunction(f);
-  ensureImport(name, getSig(funcType));
   return f;
 }

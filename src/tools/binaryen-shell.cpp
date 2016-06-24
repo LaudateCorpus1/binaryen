@@ -41,7 +41,7 @@ using namespace wasm;
 struct Invocation {
   ModuleInstance* instance;
   IString name;
-  ModuleInstance::LiteralList arguments;
+  LiteralList arguments;
 
   Invocation(Element& invoke, ModuleInstance* instance, SExpressionWasmBuilder& builder) : instance(instance) {
     assert(invoke[0]->str() == INVOKE);
@@ -77,14 +77,14 @@ static void run_asserts(size_t* i, bool* checked, Module* wasm,
   std::unique_ptr<ShellExternalInterface> interface;
   std::unique_ptr<ModuleInstance> instance;
   if (wasm) {
-    interface = make_unique<ShellExternalInterface>();
-    instance = make_unique<ModuleInstance>(*wasm, interface.get());
+    interface = wasm::make_unique<ShellExternalInterface>(); // prefix make_unique to work around visual studio bugs
+    instance = wasm::make_unique<ModuleInstance>(*wasm, interface.get());
     if (entry.is()) {
       Function* function = wasm->getFunction(entry);
       if (!function) {
         std::cerr << "Unknown entry " << entry << std::endl;
       } else {
-        ModuleInstance::LiteralList arguments;
+        LiteralList arguments;
         for (WasmType param : function->params) {
           arguments.push_back(Literal(param));
         }
@@ -131,6 +131,7 @@ static void run_asserts(size_t* i, bool* checked, Module* wasm,
       // an invoke test
       assert(wasm);
       bool trapped = false;
+      WASM_UNUSED(trapped);
       Literal result;
       try {
         Invocation invocation(*curr[1], instance.get(), *builder->get());
@@ -198,6 +199,11 @@ int main(int argc, const char* argv[]) {
 
   auto input(read_file<std::vector<char>>(options.extra["infile"], Flags::Text, options.debug ? Flags::Debug : Flags::Release));
 
+  std::unique_ptr<Output> output;
+  if (options.extra.count("output") > 0) {
+    output = wasm::make_unique<Output>(options.extra["output"], Flags::Text, options.debug ? Flags::Debug : Flags::Release);
+  }
+
   bool checked = false;
 
   try {
@@ -214,7 +220,7 @@ int main(int argc, const char* argv[]) {
         if (options.debug) std::cerr << "parsing s-expressions to wasm...\n";
         Module wasm;
         std::unique_ptr<SExpressionWasmBuilder> builder;
-        builder = make_unique<SExpressionWasmBuilder>(wasm, *root[i]);
+        builder = wasm::make_unique<SExpressionWasmBuilder>(wasm, *root[i]);
         i++;
         assert(WasmValidator().validate(wasm));
 
@@ -236,6 +242,10 @@ int main(int argc, const char* argv[]) {
         }
 
         run_asserts(&i, &checked, &wasm, &root, &builder, entry);
+
+        if (output) {
+          WasmPrinter::printModule(&wasm, output->getStream());
+        }
       } else {
         run_asserts(&i, &checked, nullptr, &root, nullptr, entry);
       }
