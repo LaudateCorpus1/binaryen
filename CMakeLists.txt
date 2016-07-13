@@ -11,6 +11,8 @@ IF(CMAKE_BUILD_TYPE AND
   MESSAGE(FATAL_ERROR "Invalid value for CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 ENDIF()
 
+OPTION(BUILD_STATIC_LIB "Build as a static library" OFF)
+
 # Support functionality.
 
 FUNCTION(ADD_COMPILE_FLAG value)
@@ -65,7 +67,11 @@ ELSE()
   ADD_COMPILE_FLAG("-Wextra")
   ADD_COMPILE_FLAG("-Wno-unused-parameter")
   ADD_COMPILE_FLAG("-fno-omit-frame-pointer")
-  ADD_COMPILE_FLAG("-fPIC")
+  IF(WIN32)
+    ADD_COMPILE_FLAG("-D_GNU_SOURCE")
+  ELSE()
+    ADD_COMPILE_FLAG("-fPIC")
+  ENDIF()
   IF(uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     ADD_COMPILE_FLAG("-O0")
     ADD_COMPILE_FLAG("-g3")
@@ -96,7 +102,11 @@ SET(binaryen_SOURCES
   src/cfg/Relooper.cpp
   src/wasm.cpp
 )
-ADD_LIBRARY(binaryen SHARED ${binaryen_SOURCES})
+IF(BUILD_STATIC_LIB)
+  ADD_LIBRARY(binaryen STATIC ${binaryen_SOURCES})    
+ELSE()
+  ADD_LIBRARY(binaryen SHARED ${binaryen_SOURCES})
+ENDIF()
 TARGET_LINK_LIBRARIES(binaryen asmjs ${all_passes} support)
 
 SET(binaryen-shell_SOURCES
@@ -150,7 +160,7 @@ SET(wasm_dis_SOURCES
 )
 ADD_EXECUTABLE(wasm-dis
                ${wasm_dis_SOURCES})
-TARGET_LINK_LIBRARIES(wasm-dis passes support)
+TARGET_LINK_LIBRARIES(wasm-dis passes support asmjs)
 SET_PROPERTY(TARGET wasm-dis PROPERTY CXX_STANDARD 11)
 SET_PROPERTY(TARGET wasm-dis PROPERTY CXX_STANDARD_REQUIRED ON)
 INSTALL(TARGETS wasm-dis DESTINATION bin)

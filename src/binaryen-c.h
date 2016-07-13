@@ -23,6 +23,22 @@
 //
 // The third part of the API lets you provide a general control-flow
 //   graph (CFG) as input.
+//
+// The final part of the API contains miscellaneous utilities like
+//   debugging/tracing for the API itself.
+//
+// ---------------
+//
+// Thread safety: You can create Expressions in parallel, as they do not
+//                refer to global state. BinaryenAddFunction and
+//                BinaryenAddFunctionType are also thread-safe, which means
+//                that you can create functions and their contents in multiple
+//                threads. This is important since functions are where the
+//                majority of the work is done.
+//                Other methods - creating imports, exports, etc. - are
+//                not currently thread-safe (as there is typically no need
+//                to parallelize them).
+//
 //================
 
 #ifndef binaryen_h
@@ -80,6 +96,7 @@ void BinaryenModuleDispose(BinaryenModuleRef module);
 
 typedef void* BinaryenFunctionTypeRef;
 
+// Add a new function type. This is thread-safe.
 // Note: name can be NULL, in which case we auto-generate a name
 BinaryenFunctionTypeRef BinaryenAddFunctionType(BinaryenModuleRef module, const char* name, BinaryenType result, BinaryenType* paramTypes, BinaryenIndex numParams);
 
@@ -271,6 +288,10 @@ BinaryenExpressionRef BinaryenCallIndirect(BinaryenModuleRef module, BinaryenExp
 //           type or their opcode, or failing that, their children. But
 //           GetLocal has no children, it is where a "stream" of type info
 //           begins.)
+//           Note also that the index of a local can refer to a param or
+//           a var, that is, either a parameter to the function or a variable
+//           declared when you call BinaryenAddFunction. See BinaryenAddFunction
+//           for more details.
 BinaryenExpressionRef BinaryenGetLocal(BinaryenModuleRef module, BinaryenIndex index, BinaryenType type);
 BinaryenExpressionRef BinaryenSetLocal(BinaryenModuleRef module, BinaryenIndex index, BinaryenExpressionRef value);
 // Load: align can be 0, in which case it will be the natural alignment (equal to bytes)
@@ -288,11 +309,22 @@ BinaryenExpressionRef BinaryenHost(BinaryenModuleRef module, BinaryenOp op, cons
 BinaryenExpressionRef BinaryenNop(BinaryenModuleRef module);
 BinaryenExpressionRef BinaryenUnreachable(BinaryenModuleRef module);
 
+// Print an expression to stdout. Useful for debugging.
+void BinaryenExpressionPrint(BinaryenExpressionRef expr);
+
 // Functions
 
 typedef void* BinaryenFunctionRef;
 
-BinaryenFunctionRef BinaryenAddFunction(BinaryenModuleRef module, const char* name, BinaryenFunctionTypeRef type, BinaryenType* localTypes, BinaryenIndex numLocalTypes, BinaryenExpressionRef body);
+// Adds a function to the module. This is thread-safe.
+// @varTypes: the types of variables. In WebAssembly, vars share
+//            an index space with params. In other words, params come from
+//            the function type, and vars are provided in this call, and
+//            together they are all the locals. The order is first params
+//            and then vars, so if you have one param it will be at index
+//            0 (and written $0), and if you also have 2 vars they will be
+//            at indexes 1 and 2, etc., that is, they share an index space.
+BinaryenFunctionRef BinaryenAddFunction(BinaryenModuleRef module, const char* name, BinaryenFunctionTypeRef type, BinaryenType* varTypes, BinaryenIndex numVarTypes, BinaryenExpressionRef body);
 
 // Imports
 
@@ -308,7 +340,7 @@ BinaryenExportRef BinaryenAddExport(BinaryenModuleRef module, const char* intern
 
 // Function table. One per module
 
-void BinaryenSetFunctionTable(BinaryenModuleRef module, BinaryenFunctionRef* functions, BinaryenIndex numFunctions);
+void BinaryenSetFunctionTable(BinaryenModuleRef module, BinaryenFunctionRef* funcs, BinaryenIndex numFuncs);
 
 // Memory. One per module
 
@@ -324,7 +356,7 @@ void BinaryenSetStart(BinaryenModuleRef module, BinaryenFunctionRef start);
 // ========== Module Operations ==========
 //
 
-// Print a module to stdout.
+// Print a module to stdout. Useful for debugging.
 void BinaryenModulePrint(BinaryenModuleRef module);
 
 // Validate a module, showing errors on problems.
@@ -340,6 +372,11 @@ size_t BinaryenModuleWrite(BinaryenModuleRef module, char* output, size_t output
 
 // Deserialize a module from binary form.
 BinaryenModuleRef BinaryenModuleRead(char* input, size_t inputSize);
+
+// Execute a module in the Binaryen interpreter. This will create an instance of
+// the module, run it in the interpreter - which means running the start method -
+// and then destroying the instance.
+void BinaryenModuleInterpret(BinaryenModuleRef module);
 
 //
 // ========== CFG / Relooper ==========
@@ -363,10 +400,10 @@ RelooperBlockRef RelooperAddBlock(RelooperRef relooper, BinaryenExpressionRef co
 void RelooperAddBranch(RelooperBlockRef from, RelooperBlockRef to, BinaryenExpressionRef condition, BinaryenExpressionRef code);
 
 // Create a basic block that ends a switch on a condition
-// TODO RelooperBlockRef RelooperAddBlockWithSwitch(RelooperRef relooper, BinaryenExpressionRef code, BinaryenExpressionRef condition);
+RelooperBlockRef RelooperAddBlockWithSwitch(RelooperRef relooper, BinaryenExpressionRef code, BinaryenExpressionRef condition);
 
-// Create a switch-style branch to another basic block. The block's switch table will have an index for this branch
-// TODO void RelooperAddBranchForSwitch(RelooperBlockRef from, RelooperBlockRef to, BinaryenIndex index, BinaryenExpressionRef code);
+// Create a switch-style branch to another basic block. The block's switch table will have these indexes going to that target
+void RelooperAddBranchForSwitch(RelooperBlockRef from, RelooperBlockRef to, BinaryenIndex* indexes, BinaryenIndex numIndexes, BinaryenExpressionRef code);
 
 // Generate structed wasm control flow from the CFG of blocks and branches that were created
 // on this relooper instance. This returns the rendered output, and also disposes of the
@@ -375,6 +412,19 @@ void RelooperAddBranch(RelooperBlockRef from, RelooperBlockRef to, BinaryenExpre
 //                      guide us to the right target label. This value should be an index of
 //                      an i32 local variable that is free for us to use.
 BinaryenExpressionRef RelooperRenderAndDispose(RelooperRef relooper, RelooperBlockRef entry, BinaryenIndex labelHelper, BinaryenModuleRef module);
+
+//
+// ========= Other APIs =========
+//
+
+// Sets whether API tracing is on or off. It is off by default. When on, each call
+// to an API method will print out C code equivalent to it, which is useful for
+// auto-generating standalone testcases from projects using the API.
+// When calling this to turn on tracing, the prelude of the full program is printed,
+// and when calling it to turn it off, the ending of the program is printed, giving
+// you the full compilable testcase.
+// TODO: compile-time option to enable/disable this feature entirely at build time.
+void BinaryenSetAPITracing(int on);
 
 #ifdef __cplusplus
 } // extern "C"

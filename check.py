@@ -164,7 +164,7 @@ def run_command(cmd, expected_status=0, stderr=None):
 
 def fail(actual, expected):
   raise Exception("incorrect output, diff:\n\n%s" % (
-    ''.join([a.rstrip()+'\n' for a in difflib.unified_diff(expected.split('\n'), actual.split('\n'), fromfile='expected', tofile='actual')])[-1000:]
+    ''.join([a.rstrip()+'\n' for a in difflib.unified_diff(expected.split('\n'), actual.split('\n'), fromfile='expected', tofile='actual')])[:]
   ))
 
 def fail_if_not_identical(actual, expected):
@@ -453,7 +453,7 @@ for t in spec_tests:
 
     # check binary format. here we can verify execution of the final result, no need for an output verification
     split_num = 0
-    if os.path.basename(wast) not in ['has_feature.wast']: # avoid some tests with things still in spec tests, but likely to be taken out soon
+    if os.path.basename(wast) not in ['call_indirect.wast']: # avoid some tests with things still being sorted out in the spec https://github.com/WebAssembly/spec/pull/301
       actual = ''
       for module, asserts in split_wast(wast):
         print '    testing split module', split_num
@@ -665,33 +665,49 @@ print '\n[ checking example testcases... ]\n'
 for t in sorted(os.listdir(os.path.join('test', 'example'))):
   output_file = os.path.join('bin', 'example')
   cmd = ['-Isrc', '-g', '-lasmjs', '-lsupport', '-Llib/.', '-pthread', '-o', output_file]
-  if t.endswith('.c'):
+  if t.endswith('.txt'):
+    # check if there is a trace in the file, if so, we should build it
+    out = subprocess.Popen([os.path.join('scripts', 'clean_c_api_trace.py'), os.path.join('test', 'example', t)], stdout=subprocess.PIPE).communicate()[0]
+    if len(out) == 0:
+      print '  (no trace in ', t, ')'
+      continue
+    print '  (will check trace in ', t, ')'
+    src = 'trace.cpp'
+    open(src, 'w').write(out)
+    expected = os.path.join('test', 'example', t + '.txt')
+  else:
+    src = os.path.join('test', 'example', t)
+    expected = os.path.join('test', 'example', '.'.join(t.split('.')[:-1]) + '.txt')
+  if src.endswith(('.c', '.cpp')):
     # build the C file separately
     extra = [os.environ.get('CC') or 'gcc',
-             os.path.join('test', 'example', t), '-c', '-o', 'example.o',
+             src, '-c', '-o', 'example.o',
              '-Isrc', '-g', '-Llib/.', '-pthread']
-    print ' '.join(extra)
+    print 'build: ', ' '.join(extra)
     subprocess.check_call(extra)
     # Link against the binaryen C library DSO, using an executable-relative rpath
-    cmd = ['example.o', '-lbinaryen'] + cmd
-    if sys.platform == 'linux' or sys.platform == 'linux2':
-      cmd = cmd + ['-Wl,-rpath=$ORIGIN/../lib']
+    cmd = ['example.o', '-lbinaryen'] + cmd + ['-Wl,-rpath=$ORIGIN/../lib']
   else:
     continue
+  print '  ', t, src, expected
   if os.environ.get('COMPILER_FLAGS'):
     for f in os.environ.get('COMPILER_FLAGS').split(' '):
       cmd.append(f)
   cmd = [os.environ.get('CXX') or 'g++', '-std=c++11'] + cmd
-  print ' '.join(cmd)
   try:
+    print 'link: ', ' '.join(cmd)
     subprocess.check_call(cmd)
-    actual = subprocess.Popen([output_file], stdout=subprocess.PIPE).communicate()[0]
-    expected = open(os.path.join('test', 'example', '.'.join(t.split('.')[:-1]) + '.txt')).read()
+    print 'run...', output_file
+    proc = subprocess.Popen([output_file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    actual, err = proc.communicate()
+    assert proc.returncode == 0, [proc.returncode, actual, err]
   finally:
     os.remove(output_file)
     if sys.platform == 'darwin':
       # Also removes debug directory produced on Mac OS
       shutil.rmtree(output_file + '.dSYM')
+
+  expected = open(expected).read()
   if actual != expected:
     fail(actual, expected)
 
@@ -784,7 +800,7 @@ if has_emcc:
         extra = json.loads(open(emcc).read())
       if os.path.exists('a.normal.js'): os.unlink('a.normal.js')
       for opts in [[], ['-O1'], ['-O2'], ['-O3'], ['-Oz']]:
-        for method in ['interpret-asm2wasm', 'interpret-s-expr', 'asmjs', 'interpret-binary']:
+        for method in ['interpret-asm2wasm', 'interpret-s-expr', 'interpret-binary']:
           command = ['emcc', '-o', 'a.wasm.js', '-s', 'BINARYEN=1', os.path.join('test', c)] + opts + extra
           command += ['-s', 'BINARYEN_METHOD="' + method + '"']
           print '....' + ' '.join(command)

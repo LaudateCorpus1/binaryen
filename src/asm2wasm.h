@@ -25,6 +25,7 @@
 #include "wasm.h"
 #include "emscripten-optimizer/optimizer.h"
 #include "mixed_arena.h"
+#include "shared-constants.h"
 #include "asmjs/shared-constants.h"
 #include "asm_v_wasm.h"
 #include "passes/passes.h"
@@ -155,7 +156,6 @@ class Asm2WasmBuilder {
 
   // function table
   std::map<IString, int> functionTableStarts; // each asm function table gets a range in the one wasm table, starting at a location
-  std::map<CallIndirect*, IString> callIndirects; // track these, as we need to fix them after we know the functionTableStarts. this maps call => its function table
 
   bool memoryGrowth;
   bool debug;
@@ -223,7 +223,6 @@ private:
   // uses, in the first pass
 
   std::map<IString, std::unique_ptr<FunctionType>> importedFunctionTypes;
-  std::map<IString, std::vector<CallImport*>> importedFunctionCalls;
 
   void noteImportedFunctionCall(Ref ast, WasmType resultType, AsmData *asmData, CallImport* call) {
     assert(ast[0] == CALL && ast[1][0] == NAME);
@@ -245,11 +244,15 @@ private:
       previous.print(std::cout, 0) << ".\n";
 #endif
       if (*type != *previous) {
-        // merge it in. we'll add on extra 0 parameters for ones not actually used, etc.
+        // merge it in. we'll add on extra 0 parameters for ones not actually used, and upgrade types to
+        // double where there is a conflict (which is ok since in JS, double can contain everything
+        // i32 and f32 can).
         for (size_t i = 0; i < type->params.size(); i++) {
           if (previous->params.size() > i) {
             if (previous->params[i] == none) {
               previous->params[i] = type->params[i]; // use a more concrete type
+            } else if (previous->params[i] != type->params[i]) {
+              previous->params[i] = f64; // overloaded type, make it a double
             }
           } else {
             previous->params.push_back(type->params[i]); // add a new param
@@ -262,7 +265,6 @@ private:
     } else {
       importedFunctionTypes[importName].swap(type);
     }
-    importedFunctionCalls[importName].push_back(call);
   }
 
   FunctionType* getFunctionType(Ref parent, ExpressionList& operands) {
@@ -743,34 +745,50 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
     wasm.removeImport(curr);
   }
 
-  // fill out call_import - add extra params as needed. asm tolerates ffi overloading, wasm does not
-  for (auto& pair : importedFunctionCalls) {
-    IString name = pair.first;
-    auto& list = pair.second;
-    auto type = importedFunctionTypes[name].get();
-    for (auto* call : list) {
-      for (size_t i = call->operands.size(); i < type->params.size(); i++) {
-        auto val = allocator.alloc<Const>();
-        val->type = val->value.type = type->params[i];
-        call->operands.push_back(val);
+  // Finalize indirect calls and import calls
+
+  struct FinalizeCalls : public WalkerPass<PostWalker<FinalizeCalls, Visitor<FinalizeCalls>>> {
+    bool isFunctionParallel() override { return true; }
+
+    Pass* create() override { return new FinalizeCalls(parent); }
+
+    Asm2WasmBuilder* parent;
+
+    FinalizeCalls(Asm2WasmBuilder* parent) : parent(parent) {}
+
+    void visitCallImport(CallImport* curr) {
+      // fill out call_import - add extra params as needed, etc. asm tolerates ffi overloading, wasm does not
+      auto iter = parent->importedFunctionTypes.find(curr->target);
+      if (iter == parent->importedFunctionTypes.end()) return; // one of our fake imports for callIndirect fixups
+      auto type = iter->second.get();
+      for (size_t i = 0; i < type->params.size(); i++) {
+        if (i >= curr->operands.size()) {
+          // add a new param
+          auto val = parent->allocator.alloc<Const>();
+          val->type = val->value.type = type->params[i];
+          curr->operands.push_back(val);
+        } else if (curr->operands[i]->type != type->params[i]) {
+          assert(type->params[i] == f64);
+          // overloaded, upgrade to f64
+          switch (curr->operands[i]->type) {
+            case i32: curr->operands[i] = parent->builder.makeUnary(ConvertSInt32ToFloat64, curr->operands[i]); break;
+            case f32: curr->operands[i] = parent->builder.makeUnary(PromoteFloat32, curr->operands[i]); break;
+            default: {} // f64, unreachable, etc., are all good
+          }
+        }
       }
     }
-  }
-
-  // finalize indirect calls
-
-  for (auto& pair : callIndirects) {
-    CallIndirect* call = pair.first;
-    IString tableName = pair.second;
-    assert(functionTableStarts.find(tableName) != functionTableStarts.end());
-    auto sub = allocator.alloc<Binary>();
-    // note that the target is already masked, so we just offset it, we don't need to guard against overflow (which would be an error anyhow)
-    sub->op = AddInt32;
-    sub->left = call->target;
-    sub->right = builder.makeConst(Literal((int32_t)functionTableStarts[tableName]));
-    sub->type = WasmType::i32;
-    call->target = sub;
-  }
+    void visitCallIndirect(CallIndirect* curr) {
+      // we already call into target = something + offset, where offset is a callImport with the name of the table. replace that with the table offset
+      auto add = curr->target->cast<Binary>();
+      auto offset = add->right->cast<CallImport>();
+      auto tableName = offset->target;
+      add->right = parent->builder.makeConst(Literal((int32_t)parent->functionTableStarts[tableName]));
+    }
+  };
+  PassRunner passRunner(&wasm);
+  passRunner.add<FinalizeCalls>(this);
+  passRunner.run();
 
   // apply memory growth, if relevant
   if (memoryGrowth) {
@@ -1371,7 +1389,8 @@ Function* Asm2WasmBuilder::processFunction(Ref ast) {
       auto* fullType = getFunctionType(astStackHelper.getParent(), ret->operands);
       ret->fullType = fullType->name;
       ret->type = fullType->result;
-      callIndirects[ret] = target[1][1]->getIString(); // we need to fix this up later, when we know how asm function tables are layed out inside the wasm table.
+      // we don't know the table offset yet. emit target = target + callImport(tableName), which we fix up later when we know how asm function tables are layed out inside the wasm table.
+      ret->target = builder.makeBinary(BinaryOp::AddInt32, ret->target, builder.makeCallImport(target[1][1]->getIString(), {}, i32));
       return ret;
     } else if (what == RETURN) {
       WasmType type = !!ast[1] ? detectWasmType(ast[1], &asmData) : none;

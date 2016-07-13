@@ -28,6 +28,7 @@
 
 #include "wasm.h"
 #include "wasm-binary.h"
+#include "shared-constants.h"
 #include "asmjs/shared-constants.h"
 #include "mixed_arena.h"
 #include "parsing.h"
@@ -41,7 +42,7 @@ using namespace cashew;
 
 // Globals
 
-int unhex(char c) {
+inline int unhex(char c) {
   if (c >= '0' && c <= '9') return c - '0';
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
   if (c >= 'A' && c <= 'F') return c - 'A' + 10;
@@ -77,6 +78,7 @@ public:
   }
 
   Element* operator[](unsigned i) {
+    if (i >= list().size()) throw ParseException("expected more elements in list", line, col);
     return list()[i];
   }
 
@@ -496,6 +498,14 @@ private:
       body = allocator.alloc<Nop>();
     }
     if (currFunction->result != result) throw ParseException("bad func declaration", s.line, s.col);
+    /* TODO: spec in flux, https://github.com/WebAssembly/spec/pull/301
+    if (type.isNull()) {
+      // if no function type provided, generate a private one for this function
+      auto* functionType = sigToFunctionType(getSig(currFunction.get()));
+      wasm.addFunctionType(functionType);
+      type = functionType->name;
+    }
+    */
     currFunction->body = body;
     currFunction->type = type;
     wasm.addFunction(currFunction.release());

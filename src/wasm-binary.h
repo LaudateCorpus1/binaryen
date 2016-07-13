@@ -238,16 +238,16 @@ enum Meta {
 };
 
 namespace Section {
-  auto Memory = "memory";
-  auto Signatures = "type";
-  auto ImportTable = "import";
-  auto FunctionSignatures = "function";
-  auto Functions = "code";
-  auto ExportTable = "export";
-  auto DataSegments = "data";
-  auto FunctionTable = "table";
-  auto Names = "name";
-  auto Start = "start";
+  extern const char* Memory;
+  extern const char* Signatures;
+  extern const char* ImportTable;
+  extern const char* FunctionSignatures;
+  extern const char* Functions;
+  extern const char* ExportTable;
+  extern const char* DataSegments;
+  extern const char* FunctionTable;
+  extern const char* Names;
+  extern const char* Start;
 };
 
 enum FunctionEntry {
@@ -445,7 +445,7 @@ enum TypeForms {
 
 } // namespace BinaryConsts
 
-int8_t binaryWasmType(WasmType type) {
+inline int8_t binaryWasmType(WasmType type) {
   switch (type) {
     case none: return 0;
     case i32: return 1;
@@ -469,6 +469,7 @@ class WasmBinaryWriter : public Visitor<WasmBinaryWriter, void> {
       if (func->type.isNull()) {
         func->type = ensureFunctionType(getSig(func.get()), wasm)->name;
       }
+      // TODO: depending on upstream flux https://github.com/WebAssembly/spec/pull/301 might want this: assert(!func->type.isNull());
     }
   }
 

@@ -21,6 +21,7 @@
 #include <sstream>
 #include <string>
 
+#include "shared-constants.h"
 #include "asmjs/shared-constants.h"
 #include "mixed_arena.h"
 #include "support/utilities.h"
@@ -34,7 +35,7 @@ inline Expression* parseConst(cashew::IString s, WasmType type, MixedArena& allo
   auto ret = allocator.alloc<Const>();
   ret->type = type;
   if (isWasmTypeFloat(type)) {
-    if (s == INFINITY_) {
+    if (s == _INFINITY) {
       switch (type) {
         case f32: ret->value = Literal(std::numeric_limits<float>::infinity()); break;
         case f64: ret->value = Literal(std::numeric_limits<double>::infinity()); break;
@@ -52,7 +53,7 @@ inline Expression* parseConst(cashew::IString s, WasmType type, MixedArena& allo
       //std::cerr << "make constant " << str << " ==> " << ret->value << '\n';
       return ret;
     }
-    if (s == NAN_) {
+    if (s == _NAN) {
       switch (type) {
         case f32: ret->value = Literal(float(std::nan(""))); break;
         case f64: ret->value = Literal(double(std::nan(""))); break;
@@ -126,7 +127,7 @@ inline Expression* parseConst(cashew::IString s, WasmType type, MixedArena& allo
         ret->value = Literal(negative ? -temp : temp);
       } else {
         std::istringstream istr(str);
-        int32_t temp;
+        uint32_t temp;
         istr >> temp;
         ret->value = Literal(temp);
       }
@@ -142,7 +143,7 @@ inline Expression* parseConst(cashew::IString s, WasmType type, MixedArena& allo
         ret->value = Literal(negative ? -temp : temp);
       } else {
         std::istringstream istr(str);
-        int64_t temp;
+        uint64_t temp;
         istr >> temp;
         ret->value = Literal(temp);
       }
