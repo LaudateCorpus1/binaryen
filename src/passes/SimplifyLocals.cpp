@@ -243,7 +243,7 @@ struct SimplifyLocals : public WalkerPass<LinearExecutionWalker<SimplifyLocals, 
       if (!ExpressionAnalyzer::isResultUsed(self->expressionStack, self->getFunction())) {
         Index index = set->index;
         assert(self->sinkables.count(index) == 0);
-        self->sinkables.emplace(std::make_pair(index, SinkableInfo(currp)));
+        self->sinkables.insert(std::make_pair(index, SinkableInfo(currp)));
       }
     }
 
