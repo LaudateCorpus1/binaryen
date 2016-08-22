@@ -187,7 +187,7 @@ public:
 private:
   void allocateGlobal(IString name, WasmType type, bool import, IString module = IString(), IString base = IString()) {
     assert(mappedGlobals.find(name) == mappedGlobals.end());
-    mappedGlobals.emplace(name, MappedGlobal(nextGlobal, type, import, module, base));
+    mappedGlobals.insert(std::make_pair(name, MappedGlobal(nextGlobal, type, import, module, base)));
     nextGlobal += 8;
     assert(nextGlobal < maxGlobal);
   }
@@ -654,7 +654,7 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
             }
           }
           assert(views.find(name) == views.end());
-          views.emplace(name, View(bytes, integer, signed_, asmType));
+          views.insert(std::make_pair(name, View(bytes, integer, signed_, asmType)));
         } else if (value[0] == ARRAY) {
           // function table. we merge them into one big table, so e.g.   [foo, b1] , [b2, bar]  =>  [foo, b1, b2, bar]
           // TODO: when not using aliasing function pointers, we could merge them by noticing that
