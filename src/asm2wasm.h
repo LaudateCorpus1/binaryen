@@ -628,7 +628,7 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
       import->name = Name(std::string(import->name.str) + "$asm2wasm$import");
       import->kind = ExternalKind::Global;
       import->globalType = type;
-      mappedGlobals.emplace(name, type);
+      mappedGlobals.insert(std::make_pair(name, type));
       {
         auto global = new Global();
         global->name = name;
