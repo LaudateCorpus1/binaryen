@@ -1423,16 +1423,16 @@ public:
   }
   uint32_t getInt32() {
     if (debug) std::cerr << "<==" << std::endl;
-    auto ret = uint32_t(getInt16());
-    ret |= uint32_t(getInt16()) << 16;
-    if (debug) std::cerr << "getInt32: " << ret << "/0x" << std::hex << ret << std::dec <<" ==>" << std::endl;
+    auto ret = uint32_t(getInt16()); 
+    ret |= (uint32_t(getInt16()) << 16);
+    if (debug) std::cerr << "getInt32: " << ret << " ==>" << std::endl;
     return ret;
   }
   uint64_t getInt64() {
     if (debug) std::cerr << "<==" << std::endl;
-    auto ret = uint64_t(getInt32());
-    ret |= uint64_t(getInt32()) << 32;
-    if (debug) std::cerr << "getInt64: " << ret  << "/0x" << std::hex << ret << std::dec << " ==>" << std::endl;
+    auto ret = uint64_t(getInt32()); 
+    ret |= (uint64_t(getInt32()) << 32);
+    if (debug) std::cerr << "getInt64: " << ret << " ==>" << std::endl;
     return ret;
   }
   float getFloat32() {

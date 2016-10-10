@@ -274,7 +274,7 @@ struct SimplifyLocals : public WalkerPass<LinearExecutionWalker<SimplifyLocals, 
     if (set && !set->isTee() && (!self->firstCycle || self->numGetLocals[set->index] == 1)) {
       Index index = set->index;
       assert(self->sinkables.count(index) == 0);
-      self->sinkables.emplace(std::make_pair(index, SinkableInfo(currp)));
+      self->sinkables.insert(std::make_pair(index, SinkableInfo(currp)));
     }
 
     self->expressionStack.pop_back();
