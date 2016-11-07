@@ -65,10 +65,13 @@ std::string PassRegistry::getPassDescription(std::string name) {
 void PassRegistry::registerPasses() {
   registerPass("coalesce-locals", "reduce # of locals by coalescing", createCoalesceLocalsPass);
   registerPass("coalesce-locals-learning", "reduce # of locals by coalescing and learning", createCoalesceLocalsWithLearningPass);
+  registerPass("code-pushing", "push code forward, potentially making it not always execute", createCodePushingPass);
   registerPass("dce", "removes unreachable code", createDeadCodeEliminationPass);
   registerPass("duplicate-function-elimination", "removes duplicate functions", createDuplicateFunctionEliminationPass);
   registerPass("extract-function", "leaves just one function (useful for debugging)", createExtractFunctionPass);
+  registerPass("inlining", "inlines functions (currently only ones with a single use)", createInliningPass);
   registerPass("legalize-js-interface", "legalizes i64 types on the import/export boundary", createLegalizeJSInterfacePass);
+  registerPass("memory-packing", "packs memory into separate segments, skipping zeros", createMemoryPackingPass);
   registerPass("merge-blocks", "merges blocks to their parents", createMergeBlocksPass);
   registerPass("metrics", "reports metrics", createMetricsPass);
   registerPass("nm", "name list", createNameListPass);
@@ -78,6 +81,7 @@ void PassRegistry::registerPasses() {
   registerPass("print", "print in s-expression format", createPrinterPass);
   registerPass("print-minified", "print in minified s-expression format", createMinifiedPrinterPass);
   registerPass("print-full", "print in full s-expression format", createFullPrinterPass);
+  registerPass("print-call-graph", "print call graph", createPrintCallGraphPass);
   registerPass("relooper-jump-threading", "thread relooper jumps (fastcomp output only)", createRelooperJumpThreadingPass);
   registerPass("remove-imports", "removes imports and replaces them with nops", createRemoveImportsPass);
   registerPass("remove-memory", "removes memory segments", createRemoveMemoryPass);
@@ -87,6 +91,9 @@ void PassRegistry::registerPasses() {
   registerPass("reorder-functions", "sorts functions by access frequency", createReorderFunctionsPass);
   registerPass("reorder-locals", "sorts locals by access frequency", createReorderLocalsPass);
   registerPass("simplify-locals", "miscellaneous locals-related optimizations", createSimplifyLocalsPass);
+  registerPass("simplify-locals-notee", "miscellaneous locals-related optimizations", createSimplifyLocalsNoTeePass);
+  registerPass("simplify-locals-nostructure", "miscellaneous locals-related optimizations", createSimplifyLocalsNoStructurePass);
+  registerPass("simplify-locals-notee-nostructure", "miscellaneous locals-related optimizations", createSimplifyLocalsNoTeeNoStructurePass);
   registerPass("vacuum", "removes obviously unneeded code", createVacuumPass);
   registerPass("precompute", "computes compile-time evaluatable expressions", createPrecomputePass);
 //  registerPass("lower-i64", "lowers i64 into pairs of i32s", createLowerInt64Pass);
@@ -94,22 +101,10 @@ void PassRegistry::registerPasses() {
 
 void PassRunner::addDefaultOptimizationPasses() {
   add("duplicate-function-elimination");
-  add("dce");
-  add("remove-unused-brs");
-  add("remove-unused-names");
-  add("optimize-instructions");
-  add("precompute");
-  add("simplify-locals");
-  add("vacuum"); // previous pass creates garbage
-  add("remove-unused-brs"); // simplify-locals opens opportunities for phi optimizations
-  add("coalesce-locals");
-  add("vacuum"); // previous pass creates garbage
-  add("reorder-locals");
-  add("merge-blocks");
-  add("optimize-instructions");
-  add("precompute");
-  add("vacuum"); // should not be needed, last few passes do not create garbage, but just to be safe
+  addDefaultFunctionOptimizationPasses();
   add("duplicate-function-elimination"); // optimizations show more functions as duplicate
+  add("remove-unused-functions");
+  add("memory-packing");
 }
 
 void PassRunner::addDefaultFunctionOptimizationPasses() {
@@ -118,12 +113,18 @@ void PassRunner::addDefaultFunctionOptimizationPasses() {
   add("remove-unused-names");
   add("optimize-instructions");
   add("precompute");
-  add("simplify-locals");
-  add("vacuum"); // previous pass creates garbage
-  add("remove-unused-brs"); // simplify-locals opens opportunities for phi optimizations
-  add("coalesce-locals");
+  if (options.optimizeLevel >= 2 || options.shrinkLevel >= 2) {
+    add("code-pushing");
+  }
+  add("simplify-locals-nostructure"); // don't create if/block return values yet, as coalesce can remove copies that that could inhibit
   add("vacuum"); // previous pass creates garbage
   add("reorder-locals");
+  add("remove-unused-brs"); // simplify-locals opens opportunities for optimizations
+  add("coalesce-locals");
+  add("simplify-locals");
+  add("vacuum"); // previous pass creates garbage
+  add("reorder-locals");
+  add("remove-unused-brs"); // coalesce-locals opens opportunities for optimizations
   add("merge-blocks");
   add("optimize-instructions");
   add("precompute");
@@ -132,10 +133,12 @@ void PassRunner::addDefaultFunctionOptimizationPasses() {
 
 void PassRunner::addDefaultGlobalOptimizationPasses() {
   add("duplicate-function-elimination");
+  add("remove-unused-functions");
+  add("memory-packing");
 }
 
 void PassRunner::run() {
-  if (debug) {
+  if (options.debug) {
     // for debug logging purposes, run each pass in full before running the other
     auto totalTime = std::chrono::duration<double>(0);
     size_t padding = 0;
@@ -143,17 +146,19 @@ void PassRunner::run() {
     for (auto pass : passes) {
       padding = std::max(padding, pass->name.size());
     }
+    bool passDebug = getenv("BINARYEN_PASS_DEBUG") && getenv("BINARYEN_PASS_DEBUG")[0] != '0';
     for (auto* pass : passes) {
       // ignoring the time, save a printout of the module before, in case this pass breaks it, so we can print the before and after
       std::stringstream moduleBefore;
-      WasmPrinter::printModule(wasm, moduleBefore);
+      if (passDebug) {
+        WasmPrinter::printModule(wasm, moduleBefore);
+      }
       // prepare to run
-      std::chrono::high_resolution_clock::time_point before;
       std::cerr << "[PassRunner]   running pass: " << pass->name << "... ";
       for (size_t i = 0; i < padding - pass->name.size(); i++) {
         std::cerr << ' ';
       }
-      before = std::chrono::high_resolution_clock::now();
+      auto before = std::chrono::steady_clock::now();
       if (pass->isFunctionParallel()) {
         // function-parallel passes should get a new instance per function
         for (auto& func : wasm->functions) {
@@ -162,21 +167,25 @@ void PassRunner::run() {
       } else {
         pass->run(this, wasm);
       }
-      auto after = std::chrono::high_resolution_clock::now();
+      auto after = std::chrono::steady_clock::now();
       std::chrono::duration<double> diff = after - before;
       std::cerr << diff.count() << " seconds." << std::endl;
       totalTime += diff;
       // validate, ignoring the time
       std::cerr << "[PassRunner]   (validating)\n";
-      if (!WasmValidator().validate(*wasm, false, validateGlobally)) {
-        std::cerr << "Last pass (" << pass->name << ") broke validation. Here is the module before: \n" << moduleBefore.str() << "\n";
+      if (!WasmValidator().validate(*wasm, false, options.validateGlobally)) {
+        if (passDebug) {
+          std::cerr << "Last pass (" << pass->name << ") broke validation. Here is the module before: \n" << moduleBefore.str() << "\n";
+        } else {
+          std::cerr << "Last pass (" << pass->name << ") broke validation. Run with BINARYEN_PASS_DEBUG=1 in the env to see the earlier state\n";
+        }
         abort();
       }
     }
     std::cerr << "[PassRunner] passes took " << totalTime.count() << " seconds." << std::endl;
     // validate
     std::cerr << "[PassRunner] (final validation)\n";
-    if (!WasmValidator().validate(*wasm, false, validateGlobally)) {
+    if (!WasmValidator().validate(*wasm, false, options.validateGlobally)) {
       std::cerr << "final module does not validate\n";
       abort();
     }
@@ -227,7 +236,7 @@ void PassRunner::run() {
 }
 
 void PassRunner::runFunction(Function* func) {
-  if (debug) {
+  if (options.debug) {
     std::cerr << "[PassRunner] running passes on function " << func->name << std::endl;
   }
   for (auto* pass : passes) {

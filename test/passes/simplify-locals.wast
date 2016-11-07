@@ -12,6 +12,35 @@
   (import $_i64Subtract "env" "i64sub" (param i32 i32 i32 i32) (result i32))
   (import $___udivmoddi4 "env" "moddi" (param i32 i32 i32 i32 i32) (result i32))
   (import $lp "env" "lp" (param i32 i32) (result i32))
+  (func $contrast ;; check for tee and structure sinking
+    (local $x i32)
+    (local $y i32)
+    (local $z i32)
+    (local $a i32)
+    (local $b i32)
+    (set_local $x (i32.const 1))
+    (if (get_local $x) (nop))
+    (if (get_local $x) (nop))
+    (set_local $y (if i32 (i32.const 2) (i32.const 3) (i32.const 4)))
+    (drop (get_local $y))
+    (set_local $z (block i32 (i32.const 5)))
+    (drop (get_local $z))
+    (if (i32.const 6)
+      (set_local $a (i32.const 7))
+      (set_local $a (i32.const 8))
+    )
+    (drop (get_local $a))
+    (block $val
+      (if (i32.const 10)
+        (block
+          (set_local $b (i32.const 11))
+          (br $val)
+        )
+      )
+      (set_local $b (i32.const 12))
+    )
+    (drop (get_local $b))
+  )
   (func $b0-yes (type $4) (param $i1 i32)
     (local $x i32)
     (local $y i32)
@@ -800,5 +829,35 @@
     (return
       (i32.const 0)
     )
+  )
+  (func $drop-br_if (param $label i32) (param $$cond2 i32) (param $$$0151 i32) (result i32)
+    (block $label$break$L4
+      (if
+        (i32.eq
+          (get_local $label)
+          (i32.const 15)
+        )
+        (block $block
+          (set_local $label
+            (i32.const 0)
+          )
+          (set_local $$cond2
+            (i32.eq
+              (get_local $$$0151)
+              (i32.const 0)
+            )
+          )
+          (br_if $label$break$L4 ;; when we add a value to this, its type changes as it returns the value too, so must be dropped
+            (i32.eqz
+              (get_local $$cond2)
+            )
+          )
+        )
+      )
+      (set_local $label
+        (i32.const 1)
+      )
+    )
+    (get_local $label)
   )
 )

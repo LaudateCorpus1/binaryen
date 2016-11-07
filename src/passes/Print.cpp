@@ -615,24 +615,17 @@ struct PrintSExpression : public Visitor<PrintSExpression> {
   void printTableHeader(Table* curr) {
     printOpening(o, "table") << ' ';
     o << curr->initial;
-    if (curr->max && curr->max != Table::kMaxSize) o << ' ' << curr->max;
+    if (curr->max != Table::kMaxSize) o << ' ' << curr->max;
     o << " anyfunc)";
   }
   void visitTable(Table *curr) {
     // if table wasn't imported, declare it
-    bool found = false;
-    for (auto& import : currModule->imports) {
-      if (import->kind == ExternalKind::Table) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
+    if (!curr->imported) {
       doIndent(o, indent);
       printTableHeader(curr);
+      o << maybeNewLine;
     }
     if (curr->segments.empty()) return;
-    if (!found) o << '\n';
     doIndent(o, indent);
     for (auto& segment : curr->segments) {
       // Don't print empty segments
@@ -645,6 +638,7 @@ struct PrintSExpression : public Visitor<PrintSExpression> {
       }
       o << ')';
     }
+    o << maybeNewLine;
   }
   void printMemoryHeader(Memory* curr) {
     printOpening(o, "memory") << ' ';
@@ -655,14 +649,7 @@ struct PrintSExpression : public Visitor<PrintSExpression> {
   }
   void visitMemory(Memory* curr) {
     // if memory wasn't imported, declare it
-    bool found = false;
-    for (auto& import : currModule->imports) {
-      if (import->kind == ExternalKind::Memory) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
+    if (!curr->imported) {
       doIndent(o, indent);
       printMemoryHeader(curr);
       o << '\n';
@@ -712,8 +699,7 @@ struct PrintSExpression : public Visitor<PrintSExpression> {
       o << maybeNewLine;
     }
     if (curr->table.exists) {
-      visitTable(&curr->table);
-      o << maybeNewLine;
+      visitTable(&curr->table); // Prints its own newlines
     }
     visitMemory(&curr->memory);
     for (auto& child : curr->globals) {
