@@ -40,13 +40,15 @@ void Linker::placeStackPointer(Address stackAllocation) {
     // stack pointer to point to one past-the-end of the stack allocation.
     std::vector<char> raw;
     raw.resize(pointerSize);
-    out.addRelocation(LinkerObject::Relocation::kData, (uint32_t*)&raw[0], ".stack", stackAllocation);
+    auto relocation = new LinkerObject::Relocation(
+      LinkerObject::Relocation::kData, (uint32_t*)&raw[0], ".stack", stackAllocation);
+    out.addRelocation(relocation);
     assert(out.wasm.memory.segments.empty());
     out.addSegment("__stack_pointer", raw);
   }
 }
 
-void Linker::ensureImport(Name target, std::string signature) {
+void Linker::ensureFunctionImport(Name target, std::string signature) {
   if (!out.wasm.checkImport(target)) {
     auto import = new Import;
     import->name = import->base = target;
@@ -57,13 +59,24 @@ void Linker::ensureImport(Name target, std::string signature) {
   }
 }
 
+void Linker::ensureObjectImport(Name target) {
+  if (!out.wasm.checkImport(target)) {
+    auto import = new Import;
+    import->name = import->base = target;
+    import->module = ENV;
+    import->kind = ExternalKind::Global;
+    import->globalType = i32;
+    out.wasm.addImport(import);
+  }
+}
+
 void Linker::layout() {
   // Convert calls to undefined functions to call_imports
   for (const auto& f : out.undefinedFunctionCalls) {
     Name target = f.first;
     if (!out.symbolInfo.undefinedFunctions.count(target)) continue;
     // Create an import for the target if necessary.
-    ensureImport(target, getSig(*f.second.begin()));
+    ensureFunctionImport(target, getSig(*f.second.begin()));
     // Change each call. The target is the same since it's still the name.
     // Delete and re-allocate the Expression as CallImport to avoid undefined
     // behavior.
@@ -125,6 +138,11 @@ void Linker::layout() {
     memoryExport->value = Name::fromInt(0);
     memoryExport->kind = ExternalKind::Memory;
     out.wasm.addExport(memoryExport.release());
+  }
+
+  // Add imports for any imported objects
+  for (const auto& obj : out.symbolInfo.importedObjects) {
+    ensureObjectImport(obj);
   }
 
   // XXX For now, export all functions marked .globl.
@@ -384,7 +402,7 @@ void Linker::makeDummyFunction() {
 Function* Linker::getImportThunk(Name name, const FunctionType* funcType) {
   Name thunkName = std::string("__importThunk_") + name.c_str();
   if (Function* thunk = out.wasm.checkFunction(thunkName)) return thunk;
-  ensureImport(name, getSig(funcType));
+  ensureFunctionImport(name, getSig(funcType));
   wasm::Builder wasmBuilder(out.wasm);
   std::vector<NameType> params;
   Index p = 0;

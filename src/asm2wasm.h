@@ -105,7 +105,11 @@ Name I32_CTTZ("i32_cttz"),
      STORE4("store4"),
      STORE8("store8"),
      STOREF("storef"),
-     STORED("stored");
+     STORED("stored"),
+     FTCALL("ftCall_"),
+     MFTCALL("mftCall_"),
+     MAX_("max"),
+     MIN_("min");
 
 // Utilities
 
@@ -278,6 +282,8 @@ private:
   IString Math_floor;
   IString Math_ceil;
   IString Math_sqrt;
+  IString Math_max;
+  IString Math_min;
 
   IString llvm_cttz_i32;
 
@@ -604,6 +610,14 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
           assert(Math_sqrt.isNull());
           Math_sqrt = name;
           return;
+        } else if (imported[2] == MAX_) {
+          assert(Math_max.isNull());
+          Math_max = name;
+          return;
+        } else if (imported[2] == MIN_) {
+          assert(Math_min.isNull());
+          Math_min = name;
+          return;
         }
       }
       std::string fullName = module[1][1]->getCString();
@@ -635,19 +649,24 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
       type = WasmType::f64;
     }
     if (type != WasmType::none) {
-      // we need imported globals to be mutable, but wasm doesn't support that yet, so we must
-      // import an immutable and create a mutable global initialized to its value
-      import->name = Name(std::string(import->name.str) + "$asm2wasm$import");
+      // this is a global
       import->kind = ExternalKind::Global;
       import->globalType = type;
       mappedGlobals.insert(std::make_pair(name, type));
-      {
-        auto global = new Global();
-        global->name = name;
-        global->type = type;
-        global->init = builder.makeGetGlobal(import->name, type);
-        global->mutable_ = true;
-        wasm.addGlobal(global);
+      // tableBase and memoryBase are used as segment/element offsets, and must be constant;
+      // otherwise, an asm.js import of a constant is mutable, e.g. STACKTOP
+      if (name != "tableBase" && name != "memoryBase") {
+        // we need imported globals to be mutable, but wasm doesn't support that yet, so we must
+        // import an immutable and create a mutable global initialized to its value
+        import->name = Name(std::string(import->name.str) + "$asm2wasm$import");
+        {
+          auto global = new Global();
+          global->name = name;
+          global->type = type;
+          global->init = builder.makeGetGlobal(import->name, type);
+          global->mutable_ = true;
+          wasm.addGlobal(global);
+        }
       }
     } else {
       import->kind = ExternalKind::Function;
@@ -801,7 +820,7 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
           //       index 0 in each table is the null func, and each other index should only have one
           //       non-null func. However, that breaks down when function pointer casts are emulated.
           if (wasm.table.segments.size() == 0) {
-            wasm.table.segments.emplace_back(wasm.allocator.alloc<Const>()->set(Literal(uint32_t(0))));
+            wasm.table.segments.emplace_back(builder.makeGetGlobal(Name("tableBase"), i32));
           }
           auto& segment = wasm.table.segments[0];
           functionTableStarts[name] = segment.data.size(); // this table starts here
@@ -831,25 +850,44 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
       for (unsigned k = 0; k < contents->size(); k++) {
         Ref pair = contents[k];
         IString key = pair[0]->getIString();
-        assert(pair[1][0] == NAME);
-        IString value = pair[1][1]->getIString();
-        if (key == Name("_emscripten_replace_memory")) {
-          // asm.js memory growth provides this special non-asm function, which we don't need (we use grow_memory)
-          assert(!wasm.checkFunction(value));
-          continue;
-        } else if (key == UDIVMODDI4) {
-          udivmoddi4 = value;
-        } else if (key == GET_TEMP_RET0) {
-          getTempRet0 = value;
-        }
-        if (exported.count(key) > 0) {
-          // asm.js allows duplicate exports, but not wasm. use the last, like asm.js
-          exported[key]->value = value;
+        if (pair[1][0] == NAME) {
+          // exporting a function
+          IString value = pair[1][1]->getIString();
+          if (key == Name("_emscripten_replace_memory")) {
+            // asm.js memory growth provides this special non-asm function, which we don't need (we use grow_memory)
+            assert(!wasm.checkFunction(value));
+            continue;
+          } else if (key == UDIVMODDI4) {
+            udivmoddi4 = value;
+          } else if (key == GET_TEMP_RET0) {
+            getTempRet0 = value;
+          }
+          if (exported.count(key) > 0) {
+            // asm.js allows duplicate exports, but not wasm. use the last, like asm.js
+            exported[key]->value = value;
+          } else {
+            auto* export_ = new Export;
+            export_->name = key;
+            export_->value = value;
+            export_->kind = ExternalKind::Function;
+            wasm.addExport(export_);
+            exported[key] = export_;
+          }
         } else {
+          // export a number. create a global and export it
+          assert(pair[1][0] == NUM);
+          assert(exported.count(key) == 0);
+          auto value = pair[1][1]->getInteger();
+          auto global = new Global();
+          global->name = key;
+          global->type = i32;
+          global->init = builder.makeConst(Literal(int32_t(value)));
+          global->mutable_ = false;
+          wasm.addGlobal(global);
           auto* export_ = new Export;
           export_->name = key;
-          export_->value = value;
-          export_->kind = ExternalKind::Function;
+          export_->value = global->name;
+          export_->kind = ExternalKind::Global;
           wasm.addExport(export_);
           exported[key] = export_;
         }
@@ -859,13 +897,6 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
 
   if (runOptimizationPasses) {
     optimizingBuilder->finish();
-    PassRunner passRunner(&wasm);
-    if (debug) {
-      passRunner.setDebug(true);
-      passRunner.setValidateGlobally(false);
-    }
-    passRunner.add("post-emscripten");
-    passRunner.run();
   }
 
   // second pass. first, function imports
@@ -884,7 +915,7 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
       }
       import->functionType = ensureFunctionType(getSig(importedFunctionTypes[name].get()), &wasm);
     } else if (import->module != ASM2WASM) { // special-case the special module
-      // never actually used
+      // never actually used, which means we don't know the function type since the usage tells us, so illegal for it to remain
       toErase.push_back(name);
     }
   }
@@ -963,14 +994,19 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
 
     void visitCallIndirect(CallIndirect* curr) {
       // we already call into target = something + offset, where offset is a callImport with the name of the table. replace that with the table offset
-      auto add = curr->target->cast<Binary>();
+      // note that for an ftCall or mftCall, we have no asm.js mask, so have nothing to do here
+      auto* add = curr->target->dynCast<Binary>();
+      if (!add) return;
       if (add->right->is<CallImport>()) {
-        auto offset = add->right->cast<CallImport>();
+        auto* offset = add->right->cast<CallImport>();
         auto tableName = offset->target;
+        if (parent->functionTableStarts.find(tableName) == parent->functionTableStarts.end()) return;
         add->right = parent->builder.makeConst(Literal((int32_t)parent->functionTableStarts[tableName]));
       } else {
-        auto offset = add->left->cast<CallImport>();
+        auto* offset = add->left->dynCast<CallImport>();
+        if (!offset) return;
         auto tableName = offset->target;
+        if (parent->functionTableStarts.find(tableName) == parent->functionTableStarts.end()) return;
         add->left = parent->builder.makeConst(Literal((int32_t)parent->functionTableStarts[tableName]));
       }
     }
@@ -984,15 +1020,14 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
   passRunner.add<FinalizeCalls>(this);
   passRunner.add<ReFinalize>(); // FinalizeCalls changes call types, need to percolate
   passRunner.add<AutoDrop>(); // FinalizeCalls may cause us to require additional drops
-  if (wasmOnly) {
-    // we didn't legalize i64s in fastcomp, and so must legalize the interface to the outside
-    passRunner.add("legalize-js-interface");
-  }
+  passRunner.add("legalize-js-interface");
   if (runOptimizationPasses) {
     // autodrop can add some garbage
     passRunner.add("vacuum");
     passRunner.add("remove-unused-brs");
     passRunner.add("optimize-instructions");
+    passRunner.add("post-emscripten");
+    passRunner.add("dce"); // make sure to not emit unreachable code
   }
   passRunner.run();
 
@@ -1030,8 +1065,8 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
   wasm.table.exists = true;
   wasm.table.imported = true;
 
-  // Import memory offset
-  {
+  // Import memory offset, if not already there
+  if (!wasm.checkImport("memoryBase") && !wasm.checkGlobal("memoryBase")) {
     auto* import = new Import;
     import->name = Name("memoryBase");
     import->module = Name("env");
@@ -1041,8 +1076,8 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
     wasm.addImport(import);
   }
 
-  // Import table offset
-  {
+  // Import table offset, if not already there
+  if (!wasm.checkImport("tableBase") && !wasm.checkGlobal("tableBase")) {
     auto* import = new Import;
     import->name = Name("tableBase");
     import->module = Name("env");
@@ -1579,6 +1614,23 @@ Function* Asm2WasmBuilder::processFunction(Ref ast) {
           }
           return ret;
         }
+        if (name == Math_max || name == Math_min) {
+          // overloaded on type: f32 or f64
+          assert(ast[2]->size() == 2);
+          auto ret = allocator.alloc<Binary>();
+          ret->left = process(ast[2][0]);
+          ret->right = process(ast[2][1]);
+          if (ret->left->type == f32) {
+            ret->op = name == Math_max ? MaxFloat32 : MinFloat32;
+          } else if (ret->left->type == f64) {
+            ret->op = name == Math_max ? MaxFloat64 : MinFloat64;
+          } else {
+            abort();
+          }
+          ret->type = ret->left->type;
+          return ret;
+        }
+        bool tableCall = false;
         if (wasmOnly) {
           auto num = ast[2]->size();
           switch (name.str[0]) {
@@ -1682,10 +1734,25 @@ Function* Asm2WasmBuilder::processFunction(Ref ast) {
             default: {}
           }
         }
+        // ftCall_* and mftCall_* represent function table calls, either from the outside, or
+        // from the inside of the module. when compiling to wasm, we can just convert those
+        // into table calls
+        if ((name.str[0] == 'f' && strncmp(name.str, FTCALL.str, 7) == 0) ||
+            (name.str[0] == 'm' && strncmp(name.str, MFTCALL.str, 8) == 0)) {
+          tableCall = true;
+        }
         Expression* ret;
         ExpressionList* operands;
         bool import = false;
-        if (wasm.checkImport(name)) {
+        Index firstOperand = 0;
+        Ref args = ast[2];
+        if (tableCall) {
+          auto specific = allocator.alloc<CallIndirect>();
+          specific->target = process(args[0]);
+          firstOperand = 1;
+          operands = &specific->operands;
+          ret = specific;
+        } else if (wasm.checkImport(name)) {
           import = true;
           auto specific = allocator.alloc<CallImport>();
           specific->target = name;
@@ -1697,9 +1764,15 @@ Function* Asm2WasmBuilder::processFunction(Ref ast) {
           operands = &specific->operands;
           ret = specific;
         }
-        Ref args = ast[2];
-        for (unsigned i = 0; i < args->size(); i++) {
+        for (unsigned i = firstOperand; i < args->size(); i++) {
           operands->push_back(process(args[i]));
+        }
+        if (tableCall) {
+          auto specific = ret->dynCast<CallIndirect>();
+          // note that we could also get the type from the suffix of the name, e.g., mftCall_vi
+          auto* fullType = getFunctionType(astStackHelper.getParent(), specific->operands);
+          specific->fullType = fullType->name;
+          specific->type = fullType->result;
         }
         if (import) {
           Ref parent = astStackHelper.getParent();
@@ -2016,6 +2089,7 @@ Function* Asm2WasmBuilder::processFunction(Ref ast) {
       Ref cases = ast[2];
       bool seen = false;
       int64_t min = 0; // the lowest index we see; we will offset to it
+      int64_t max = 0; // the highest, to check if the range is too big
       for (unsigned i = 0; i < cases->size(); i++) {
         Ref curr = cases[i];
         Ref condition = curr[0];
@@ -2024,71 +2098,130 @@ Function* Asm2WasmBuilder::processFunction(Ref ast) {
           if (!seen) {
             seen = true;
             min = index;
+            max = index;
           } else {
             if (index < min) min = index;
+            if (index > max) max = index;
           }
         }
       }
-      if (br->condition->type == i32) {
-        Binary* offsetor = allocator.alloc<Binary>();
-        offsetor->op = BinaryOp::SubInt32;
-        offsetor->left = br->condition;
-        offsetor->right = builder.makeConst(Literal(int32_t(min)));
-        offsetor->type = i32;
-        br->condition = offsetor;
-      } else {
-        assert(br->condition->type == i64);
-        // 64-bit condition. after offsetting it must be in a reasonable range, but the offsetting itself must be 64-bit
-        Binary* offsetor = allocator.alloc<Binary>();
-        offsetor->op = BinaryOp::SubInt64;
-        offsetor->left = br->condition;
-        offsetor->right = builder.makeConst(Literal(int64_t(min)));
-        offsetor->type = i64;
-        br->condition = builder.makeUnary(UnaryOp::WrapInt64, offsetor); // TODO: check this fits in 32 bits
-      }
+      // we can use a switch if it's not too big
+      auto range = double(max) - double(min); // test using doubles to avoid UB
+      bool canSwitch = 0 <= range && range < 10240;
 
       auto top = allocator.alloc<Block>();
-      top->list.push_back(br);
-      top->finalize();
-
-      for (unsigned i = 0; i < cases->size(); i++) {
-        Ref curr = cases[i];
-        Ref condition = curr[0];
-        Ref body = curr[1];
-        auto case_ = processStatements(body, 0);
-        Name name;
-        if (condition->isNull()) {
-          name = br->default_ = nameMapper.pushLabelName("switch-default");
+      if (canSwitch) {
+        if (br->condition->type == i32) {
+          Binary* offsetor = allocator.alloc<Binary>();
+          offsetor->op = BinaryOp::SubInt32;
+          offsetor->left = br->condition;
+          offsetor->right = builder.makeConst(Literal(int32_t(min)));
+          offsetor->type = i32;
+          br->condition = offsetor;
         } else {
-          auto index = getLiteral(condition).getInteger();
-          assert(index >= min);
-          index -= min;
-          assert(index >= 0);
-          uint64_t index_s = index;
-          name = nameMapper.pushLabelName("switch-case");
-          if (br->targets.size() <= index_s) {
-            br->targets.resize(index_s + 1);
-          }
-          br->targets[index_s] = name;
+          assert(br->condition->type == i64);
+          // 64-bit condition. after offsetting it must be in a reasonable range, but the offsetting itself must be 64-bit
+          Binary* offsetor = allocator.alloc<Binary>();
+          offsetor->op = BinaryOp::SubInt64;
+          offsetor->left = br->condition;
+          offsetor->right = builder.makeConst(Literal(int64_t(min)));
+          offsetor->type = i64;
+          br->condition = builder.makeUnary(UnaryOp::WrapInt64, offsetor); // TODO: check this fits in 32 bits
         }
-        auto next = allocator.alloc<Block>();
+
+        top->list.push_back(br);
+        top->finalize();
+
+        for (unsigned i = 0; i < cases->size(); i++) {
+          Ref curr = cases[i];
+          Ref condition = curr[0];
+          Ref body = curr[1];
+          auto case_ = processStatements(body, 0);
+          Name name;
+          if (condition->isNull()) {
+            name = br->default_ = nameMapper.pushLabelName("switch-default");
+          } else {
+            auto index = getLiteral(condition).getInteger();
+            assert(index >= min);
+            index -= min;
+            assert(index >= 0);
+            uint64_t index_s = index;
+            name = nameMapper.pushLabelName("switch-case");
+            if (br->targets.size() <= index_s) {
+              br->targets.resize(index_s + 1);
+            }
+            br->targets[index_s] = name;
+          }
+          auto next = allocator.alloc<Block>();
+          top->name = name;
+          next->list.push_back(top);
+          next->list.push_back(case_);
+          next->finalize();
+          top = next;
+          nameMapper.popLabelName(name);
+        }
+
+        // the outermost block can be branched to to exit the whole switch
         top->name = name;
-        next->list.push_back(top);
-        next->list.push_back(case_);
-        next->finalize();
-        top = next;
-        nameMapper.popLabelName(name);
-      }
 
-      // the outermost block can be branched to to exit the whole switch
-      top->name = name;
+        // ensure a default
+        if (br->default_.isNull()) {
+          br->default_ = top->name;
+        }
+        for (size_t i = 0; i < br->targets.size(); i++) {
+          if (br->targets[i].isNull()) br->targets[i] = br->default_;
+        }
+      } else {
+        // we can't switch, make an if-chain instead of br_table
+        auto var = Builder::addVar(function, br->condition->type);
+        top->list.push_back(builder.makeSetLocal(var, br->condition));
+        auto* brHolder = top;
+        If* chain = nullptr;
+        If* first = nullptr;
 
-      // ensure a default
-      if (br->default_.isNull()) {
-        br->default_ = top->name;
-      }
-      for (size_t i = 0; i < br->targets.size(); i++) {
-        if (br->targets[i].isNull()) br->targets[i] = br->default_;
+        for (unsigned i = 0; i < cases->size(); i++) {
+          Ref curr = cases[i];
+          Ref condition = curr[0];
+          Ref body = curr[1];
+          auto case_ = processStatements(body, 0);
+          Name name;
+          if (condition->isNull()) {
+            name = br->default_ = nameMapper.pushLabelName("switch-default");
+          } else {
+            name = nameMapper.pushLabelName("switch-case");
+            auto* iff = builder.makeIf(
+              builder.makeBinary(
+                br->condition->type == i32 ? EqInt32 : EqInt64,
+                builder.makeGetLocal(var, br->condition->type),
+                builder.makeConst(getLiteral(condition))
+              ),
+              builder.makeBreak(name),
+              chain
+            );
+            chain = iff;
+            if (!first) first = iff;
+          }
+          auto next = allocator.alloc<Block>();
+          top->name = name;
+          next->list.push_back(top);
+          next->list.push_back(case_);
+          next->finalize();
+          top = next;
+          nameMapper.popLabelName(name);
+        }
+
+        // the outermost block can be branched to to exit the whole switch
+        top->name = name;
+
+        // ensure a default
+        if (br->default_.isNull()) {
+          br->default_ = top->name;
+        }
+
+        first->ifFalse = builder.makeBreak(br->default_);
+
+        brHolder->list.push_back(chain);
+        brHolder->finalize();
       }
 
       breakStack.pop_back();

@@ -68,34 +68,6 @@ struct BreakSeeker : public PostWalker<BreakSeeker, Visitor<BreakSeeker>> {
   }
 };
 
-// Finds all functions that are reachable via direct calls.
-
-struct DirectCallGraphAnalyzer : public PostWalker<DirectCallGraphAnalyzer, Visitor<DirectCallGraphAnalyzer>> {
-  Module *module;
-  std::vector<Function*> queue;
-  std::unordered_set<Function*> reachable;
-
-  DirectCallGraphAnalyzer(Module* module, const std::vector<Function*>& root) : module(module) {
-    for (auto* curr : root) {
-      queue.push_back(curr);
-    }
-    while (queue.size()) {
-      auto* curr = queue.back();
-      queue.pop_back();
-      if (reachable.count(curr) == 0) {
-        reachable.insert(curr);
-        walk(curr->body);
-      }
-    }
-  }
-  void visitCall(Call *curr) {
-    auto* target = module->getFunction(curr->target);
-    if (reachable.count(target) == 0) {
-      queue.push_back(target);
-    }
-  }
-};
-
 // Look for side effects, including control flow
 // TODO: optimize
 
@@ -324,7 +296,7 @@ struct ExpressionManipulator {
         return ret;
       }
       Expression* visitCallIndirect(CallIndirect *curr) {
-        auto* ret = builder.makeCallIndirect(curr->fullType, curr->target, {}, curr->type);
+        auto* ret = builder.makeCallIndirect(curr->fullType, copy(curr->target), {}, curr->type);
         for (Index i = 0; i < curr->operands.size(); i++) {
           ret->operands.push_back(copy(curr->operands[i]));
         }
@@ -742,6 +714,16 @@ struct ExpressionAnalyzer {
         continue;
       }
       hash(curr->_id);
+      // we often don't need to hash the type, as it is tied to other values
+      // we are hashing anyhow, but there are exceptions: for example, a
+      // get_local's type is determined by the function, so if we are
+      // hashing only expression fragments, then two from different
+      // functions may turn out the same even if the type differs. Likewise,
+      // if we hash between modules, then we need to take int account
+      // call_imports type, etc. The simplest thing is just to hash the
+      // type for all of them.
+      hash(curr->type);
+
       #define PUSH(clazz, what) \
         stack.push_back(curr->cast<clazz>()->what);
       #define HASH(clazz, what) \

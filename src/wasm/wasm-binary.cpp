@@ -38,8 +38,8 @@ void WasmBinaryWriter::write() {
   writeMemory();
   writeGlobals();
   writeExports();
-  writeTableElements();
   writeStart();
+  writeTableElements();
   writeFunctions();
   writeDataSegments();
   if (debugInfo) writeNames();
@@ -879,6 +879,9 @@ void WasmBinaryWriter::visitDrop(Drop *curr) {
   o << int8_t(BinaryConsts::Drop);
 }
 
+// reader
+
+static Name RETURN_BREAK("binaryen|break-to-return");
 
 void WasmBinaryBuilder::read() {
 
@@ -889,6 +892,8 @@ void WasmBinaryBuilder::read() {
     uint32_t sectionCode = getU32LEB();
     uint32_t payloadLen = getU32LEB();
     if (pos + payloadLen > input.size()) throw ParseException("Section extends beyond end of input");
+
+    auto oldPos = pos;
 
     switch (sectionCode) {
       case BinaryConsts::Section::Start: readStart(); break;
@@ -904,28 +909,31 @@ void WasmBinaryBuilder::read() {
         // imports can read global imports, so we run getGlobalName and create the mapping
         // but after we read globals, we need to add the internal globals too, so do that here
         mappedGlobals.clear(); // wipe the mapping
-        getGlobalName(0); // force rebuild
+        getGlobalName(-1); // force rebuild
         break;
       }
       case BinaryConsts::Section::Data: readDataSegments(); break;
       case BinaryConsts::Section::Table: readFunctionTableDeclaration(); break;
-
-      default:
-        if (!readUserSection()) abort();
+      default: {
+        readUserSection();
+        pos = oldPos + payloadLen;
+      }
     }
+
+    // make sure we advanced exactly past this section
+    assert(pos == oldPos + payloadLen);
   }
 
   processFunctions();
 }
 
-bool WasmBinaryBuilder::readUserSection() {
+void WasmBinaryBuilder::readUserSection() {
   Name sectionName = getInlineString();
   if (sectionName.equals(BinaryConsts::UserSections::Name)) {
     readNames();
-    return true;
+  } else {
+    std::cerr << "unfamiliar section: " << sectionName << std::endl;
   }
-  std::cerr << "unfamiliar section: " << sectionName << std::endl;
-  return false;
 }
 
 uint8_t WasmBinaryBuilder::getInt8() {
@@ -1239,15 +1247,22 @@ void WasmBinaryBuilder::readFunctions() {
       // process the function body
       if (debug) std::cerr << "processing function: " << i << std::endl;
       nextLabel = 0;
+      breaksToReturn = false;
       // process body
       assert(breakStack.empty());
+      breakStack.emplace_back(RETURN_BREAK, func->result != none); // the break target for the function scope
       assert(expressionStack.empty());
       assert(depth == 0);
       func->body = getMaybeBlock(func->result);
       assert(depth == 0);
-      assert(breakStack.empty());
+      assert(breakStack.size() == 1);
+      breakStack.pop_back();
       assert(expressionStack.empty());
       assert(pos == endOfFunction);
+      if (breaksToReturn) {
+        // we broke to return, so we need an outer block to break to
+        func->body = Builder(wasm).blockifyWithName(func->body, RETURN_BREAK);
+      }
     }
     currFunction = nullptr;
     functions.push_back(func);
@@ -1266,6 +1281,7 @@ void WasmBinaryBuilder::readExports() {
     curr->kind = (ExternalKind)getU32LEB();
     auto index = getU32LEB();
     exportIndexes[curr] = index;
+    exportOrder.push_back(curr);
   }
 }
 
@@ -1314,6 +1330,32 @@ Expression* WasmBinaryBuilder::popExpression() {
   return ret;
 }
 
+Expression* WasmBinaryBuilder::popNonVoidExpression() {
+  auto* ret = popExpression();
+  if (ret->type != none) return ret;
+  // we found a void, so this is stacky code that we must handle carefully
+  Builder builder(wasm);
+  // add elements until we find a non-void
+  std::vector<Expression*> expressions;
+  expressions.push_back(ret);
+  while (1) {
+    auto* curr = popExpression();
+    expressions.push_back(curr);
+    if (curr->type != none) break;
+  }
+  auto* block = builder.makeBlock();
+  while (!expressions.empty()) {
+    block->list.push_back(expressions.back());
+    expressions.pop_back();
+  }
+  auto type = block->list[0]->type;
+  auto local = builder.addVar(currFunction, type);
+  block->list[0] = builder.makeSetLocal(local, block->list[0]);
+  block->list.push_back(builder.makeGetLocal(local, type));
+  block->finalize();
+  return block;
+}
+
 Name WasmBinaryBuilder::getGlobalName(Index index) {
   if (!mappedGlobals.size()) {
     // Create name => index mapping.
@@ -1327,6 +1369,7 @@ Name WasmBinaryBuilder::getGlobalName(Index index) {
       mappedGlobals[index] = wasm.globals[i]->name;
     }
   }
+  if (index == Index(-1)) return Name("null"); // just a force-rebuild
   assert(mappedGlobals.count(index));
   return mappedGlobals[index];
 }
@@ -1341,16 +1384,16 @@ void WasmBinaryBuilder::processFunctions() {
     wasm.start = getFunctionIndexName(startIndex);
   }
 
-  for (auto& iter : exportIndexes) {
-    Export* curr = iter.first;
+  for (auto* curr : exportOrder) {
+    auto index = exportIndexes[curr];
     switch (curr->kind) {
       case ExternalKind::Function: {
-        curr->value = getFunctionIndexName(iter.second);
+        curr->value = getFunctionIndexName(index);
         break;
       }
       case ExternalKind::Table: curr->value = Name::fromInt(0); break;
       case ExternalKind::Memory: curr->value = Name::fromInt(0); break;
-      case ExternalKind::Global: curr->value = getGlobalName(iter.second); break;
+      case ExternalKind::Global: curr->value = getGlobalName(index); break;
       default: WASM_UNREACHABLE();
     }
     wasm.addExport(curr);
@@ -1557,7 +1600,7 @@ Expression* WasmBinaryBuilder::getBlock(WasmType type) {
 void WasmBinaryBuilder::visitIf(If *curr) {
   if (debug) std::cerr << "zz node: If" << std::endl;
   curr->type = getWasmType();
-  curr->condition = popExpression();
+  curr->condition = popNonVoidExpression();
   curr->ifTrue = getBlock(curr->type);
   if (lastSeparator == BinaryConsts::Else) {
     curr->ifFalse = getBlock(curr->type);
@@ -1577,24 +1620,31 @@ void WasmBinaryBuilder::visitLoop(Loop *curr) {
 }
 
 WasmBinaryBuilder::BreakTarget WasmBinaryBuilder::getBreakTarget(int32_t offset) {
-  if (debug) std::cerr << "getBreakTarget "<<offset<<std::endl;
-  assert(breakStack.size() - 1 - offset < breakStack.size());
-  if (debug) std::cerr <<"breaktarget "<< breakStack[breakStack.size() - 1 - offset].name<< " arity "<<breakStack[breakStack.size() - 1 - offset].arity<< std::endl;
-  return breakStack[breakStack.size() - 1 - offset];
+  if (debug) std::cerr << "getBreakTarget " << offset << std::endl;
+  size_t index = breakStack.size() - 1 - offset;
+  assert(index < breakStack.size());
+  if (index == 0) {
+    // trying to access the topmost element means we break out
+    // to the function scope, doing in effect a return, we'll
+    // need to create a block for that.
+    breaksToReturn = true;
+  }
+  if (debug) std::cerr << "breaktarget "<< breakStack[index].name << " arity " << breakStack[index].arity <<  std::endl;
+  return breakStack[index];
 }
 
 void WasmBinaryBuilder::visitBreak(Break *curr, uint8_t code) {
   if (debug) std::cerr << "zz node: Break, code "<< int32_t(code) << std::endl;
   BreakTarget target = getBreakTarget(getU32LEB());
   curr->name = target.name;
-  if (code == BinaryConsts::BrIf) curr->condition = popExpression();
-  if (target.arity) curr->value = popExpression();
+  if (code == BinaryConsts::BrIf) curr->condition = popNonVoidExpression();
+  if (target.arity) curr->value = popNonVoidExpression();
   curr->finalize();
 }
 
 void WasmBinaryBuilder::visitSwitch(Switch *curr) {
   if (debug) std::cerr << "zz node: Switch" << std::endl;
-  curr->condition = popExpression();
+  curr->condition = popNonVoidExpression();
 
   auto numTargets = getU32LEB();
   if (debug) std::cerr << "targets: "<< numTargets<<std::endl;
@@ -1604,7 +1654,7 @@ void WasmBinaryBuilder::visitSwitch(Switch *curr) {
   auto defaultTarget = getBreakTarget(getU32LEB());
   curr->default_ = defaultTarget.name;
   if (debug) std::cerr << "default: "<< curr->default_<<std::endl;
-  if (defaultTarget.arity) curr->value = popExpression();
+  if (defaultTarget.arity) curr->value = popNonVoidExpression();
 }
 
 Expression* WasmBinaryBuilder::visitCall() {
@@ -1641,9 +1691,9 @@ void WasmBinaryBuilder::visitCallIndirect(CallIndirect *curr) {
   curr->fullType = fullType->name;
   auto num = fullType->params.size();
   curr->operands.resize(num);
-  curr->target = popExpression();
+  curr->target = popNonVoidExpression();
   for (size_t i = 0; i < num; i++) {
-    curr->operands[num - i - 1] = popExpression();
+    curr->operands[num - i - 1] = popNonVoidExpression();
   }
   curr->type = fullType->result;
 }
@@ -1659,7 +1709,7 @@ void WasmBinaryBuilder::visitSetLocal(SetLocal *curr, uint8_t code) {
   if (debug) std::cerr << "zz node: Set|TeeLocal" << std::endl;
   curr->index = getU32LEB();
   assert(curr->index < currFunction->getNumLocals());
-  curr->value = popExpression();
+  curr->value = popNonVoidExpression();
   curr->type = curr->value->type;
   curr->setTee(code == BinaryConsts::TeeLocal);
 }
@@ -1685,7 +1735,7 @@ void WasmBinaryBuilder::visitSetGlobal(SetGlobal *curr) {
   if (debug) std::cerr << "zz node: SetGlobal" << std::endl;
   auto index = getU32LEB();
   curr->name = getGlobalName(index);
-  curr->value = popExpression();
+  curr->value = popNonVoidExpression();
 }
 
 void WasmBinaryBuilder::readMemoryAccess(Address& alignment, size_t bytes, Address& offset) {
@@ -1714,7 +1764,7 @@ bool WasmBinaryBuilder::maybeVisitLoad(Expression*& out, uint8_t code) {
   }
   if (debug) std::cerr << "zz node: Load" << std::endl;
   readMemoryAccess(curr->align, curr->bytes, curr->offset);
-  curr->ptr = popExpression();
+  curr->ptr = popNonVoidExpression();
   out = curr;
   return true;
 }
@@ -1735,8 +1785,8 @@ bool WasmBinaryBuilder::maybeVisitStore(Expression*& out, uint8_t code) {
   }
   if (debug) std::cerr << "zz node: Store" << std::endl;
   readMemoryAccess(curr->align, curr->bytes, curr->offset);
-  curr->value = popExpression();
-  curr->ptr = popExpression();
+  curr->value = popNonVoidExpression();
+  curr->ptr = popNonVoidExpression();
   curr->finalize();
   out = curr;
   return true;
@@ -1816,7 +1866,7 @@ bool WasmBinaryBuilder::maybeVisitUnary(Expression*& out, uint8_t code) {
     default: return false;
   }
   if (debug) std::cerr << "zz node: Unary" << std::endl;
-  curr->value = popExpression();
+  curr->value = popNonVoidExpression();
   out = curr;
   return true;
 }
@@ -1873,8 +1923,8 @@ bool WasmBinaryBuilder::maybeVisitBinary(Expression*& out, uint8_t code) {
     default: return false;
   }
   if (debug) std::cerr << "zz node: Binary" << std::endl;
-  curr->right = popExpression();
-  curr->left = popExpression();
+  curr->right = popNonVoidExpression();
+  curr->left = popNonVoidExpression();
   curr->finalize();
   out = curr;
   return true;
@@ -1885,16 +1935,16 @@ bool WasmBinaryBuilder::maybeVisitBinary(Expression*& out, uint8_t code) {
 
 void WasmBinaryBuilder::visitSelect(Select *curr) {
   if (debug) std::cerr << "zz node: Select" << std::endl;
-  curr->condition = popExpression();
-  curr->ifFalse = popExpression();
-  curr->ifTrue = popExpression();
+  curr->condition = popNonVoidExpression();
+  curr->ifFalse = popNonVoidExpression();
+  curr->ifTrue = popNonVoidExpression();
   curr->finalize();
 }
 
 void WasmBinaryBuilder::visitReturn(Return *curr) {
   if (debug) std::cerr << "zz node: Return" << std::endl;
   if (currFunction->result != none) {
-    curr->value = popExpression();
+    curr->value = popNonVoidExpression();
   }
 }
 
@@ -1911,7 +1961,7 @@ bool WasmBinaryBuilder::maybeVisitHost(Expression*& out, uint8_t code) {
       curr = allocator.alloc<Host>();
       curr->op = GrowMemory;
       curr->operands.resize(1);
-      curr->operands[0] = popExpression();
+      curr->operands[0] = popNonVoidExpression();
       break;
     }
     default: return false;
@@ -1934,7 +1984,7 @@ void WasmBinaryBuilder::visitUnreachable(Unreachable *curr) {
 
 void WasmBinaryBuilder::visitDrop(Drop *curr) {
   if (debug) std::cerr << "zz node: Drop" << std::endl;
-  curr->value = popExpression();
+  curr->value = popNonVoidExpression();
 }
 
 } // namespace wasm
