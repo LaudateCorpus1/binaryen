@@ -960,7 +960,9 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
           val->type = val->value.type = type->params[i];
           curr->operands.push_back(val);
         } else if (curr->operands[i]->type != type->params[i]) {
-          assert(type->params[i] == f64);
+          // if the param is used, then we have overloading here and the combined type must be f64;
+          // if this is an unreachable param, then it doesn't matter.
+          assert(type->params[i] == f64 || curr->operands[i]->type == unreachable);
           // overloaded, upgrade to f64
           switch (curr->operands[i]->type) {
             case i32: curr->operands[i] = parent->builder.makeUnary(ConvertSInt32ToFloat64, curr->operands[i]); break;
@@ -1027,8 +1029,10 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
     passRunner.add("remove-unused-brs");
     passRunner.add("optimize-instructions");
     passRunner.add("post-emscripten");
-    passRunner.add("dce"); // make sure to not emit unreachable code
   }
+  // make sure to not emit unreachable code at all, even in -O0, as wasm rules for it are complex
+  // and changing.
+  passRunner.add("dce");
   passRunner.run();
 
   // apply memory growth, if relevant
