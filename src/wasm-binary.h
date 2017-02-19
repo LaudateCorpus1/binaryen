@@ -111,7 +111,8 @@ struct LEB {
         size_t sext_bits = 8 * sizeof(T) - size_t(shift);
         value <<= sext_bits;
         value >>= sext_bits;
-        assert(value < 0 && "sign-extend should produces a negative value");
+        // compilation fails on linux: comparison of unsigned expression < 0 is always false [-Werror=type-limits]
+        //assert(value < 0 && "sign-extend should produces a negative value");
       }
     }
   }
