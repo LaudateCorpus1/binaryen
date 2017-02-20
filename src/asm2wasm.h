@@ -343,7 +343,7 @@ public:
 private:
   void allocateGlobal(IString name, WasmType type) {
     assert(mappedGlobals.find(name) == mappedGlobals.end());
-    mappedGlobals.emplace(name, MappedGlobal(type));
+    mappedGlobals.insert(std::make_pair(name, MappedGlobal(type)));
     auto global = new Global();
     global->name = name;
     global->type = type;
@@ -828,7 +828,7 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
       // this is a global
       import->kind = ExternalKind::Global;
       import->globalType = type;
-      mappedGlobals.emplace(name, type);
+      mappedGlobals[name] = type;
       // tableBase and memoryBase are used as segment/element offsets, and must be constant;
       // otherwise, an asm.js import of a constant is mutable, e.g. STACKTOP
       if (name != "tableBase" && name != "memoryBase") {
@@ -989,14 +989,14 @@ void Asm2WasmBuilder::processAsm(Ref ast) {
             }
           }
           assert(views.find(name) == views.end());
-          views.emplace(name, View(bytes, integer, signed_, asmType));
+          views.insert(std::make_pair(name, View(bytes, integer, signed_, asmType)));
         } else if (value[0] == ARRAY) {
           // function table. we merge them into one big table, so e.g.   [foo, b1] , [b2, bar]  =>  [foo, b1, b2, bar]
           // TODO: when not using aliasing function pointers, we could merge them by noticing that
           //       index 0 in each table is the null func, and each other index should only have one
           //       non-null func. However, that breaks down when function pointer casts are emulated.
           if (wasm.table.segments.size() == 0) {
-            wasm.table.segments.emplace_back(builder.makeGetGlobal(Name("tableBase"), i32));
+            wasm.table.segments.push_back(builder.makeGetGlobal(Name("tableBase"), i32));
           }
           auto& segment = wasm.table.segments[0];
           functionTableStarts[name] = segment.data.size(); // this table starts here

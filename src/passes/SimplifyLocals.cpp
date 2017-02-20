@@ -280,7 +280,7 @@ struct SimplifyLocals : public WalkerPass<LinearExecutionWalker<SimplifyLocals, 
     if (set && self->canSink(set)) {
       Index index = set->index;
       assert(self->sinkables.count(index) == 0);
-      self->sinkables.emplace(std::make_pair(index, SinkableInfo(currp, self->getPassOptions())));
+      self->sinkables.insert(std::make_pair(index, SinkableInfo(currp, self->getPassOptions())));
     }
 
     self->expressionStack.pop_back();
