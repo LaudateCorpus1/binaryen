@@ -138,7 +138,7 @@ void WasmBinaryWriter::writeImports() {
     writeInlineString(import->base.str);
     o << U32LEB(int32_t(import->kind));
     switch (import->kind) {
-      case ExternalKind::Function: o << U32LEB(getFunctionTypeIndex(import->functionType->name)); break;
+      case ExternalKind::Function: o << U32LEB(getFunctionTypeIndex(import->functionType)); break;
       case ExternalKind::Table: {
         o << S32LEB(BinaryConsts::EncodedType::AnyFunc);
         writeResizableLimits(wasm->table.initial, wasm->table.max, wasm->table.max != Table::kMaxSize);
@@ -951,7 +951,8 @@ void WasmBinaryBuilder::read() {
       case BinaryConsts::Section::Data: readDataSegments(); break;
       case BinaryConsts::Section::Table: readFunctionTableDeclaration(); break;
       default: {
-        readUserSection();
+        readUserSection(payloadLen);
+        assert(pos <= oldPos + payloadLen);
         pos = oldPos + payloadLen;
       }
     }
@@ -963,12 +964,21 @@ void WasmBinaryBuilder::read() {
   processFunctions();
 }
 
-void WasmBinaryBuilder::readUserSection() {
+void WasmBinaryBuilder::readUserSection(size_t payloadLen) {
+  auto oldPos = pos;
   Name sectionName = getInlineString();
   if (sectionName.equals(BinaryConsts::UserSections::Name)) {
     readNames();
   } else {
-    std::cerr << "unfamiliar section: " << sectionName << std::endl;
+    // an unfamiliar custom section
+    wasm.userSections.resize(wasm.userSections.size() + 1);
+    auto& section = wasm.userSections.back();
+    section.name = sectionName.str;
+    auto sectionSize = payloadLen - (pos - oldPos);
+    section.data.resize(sectionSize);
+    for (size_t i = 0; i < sectionSize; i++) {
+      section.data[i] = getInt8();
+    }
   }
 }
 
@@ -1198,8 +1208,8 @@ void WasmBinaryBuilder::readImports() {
       case ExternalKind::Function: {
         auto index = getU32LEB();
         assert(index < wasm.functionTypes.size());
-        curr->functionType = wasm.functionTypes[index].get();
-        assert(curr->functionType->name.is());
+        curr->functionType = wasm.functionTypes[index]->name;
+        assert(curr->functionType.is());
         functionImportIndexes.push_back(curr->name);
         break;
       }
@@ -1703,7 +1713,7 @@ Expression* WasmBinaryBuilder::visitCall() {
     auto* call = allocator.alloc<CallImport>();
     auto* import = wasm.getImport(functionImportIndexes[index]);
     call->target = import->name;
-    type = import->functionType;
+    type = wasm.getFunctionType(import->functionType);
     fillCall(call, type);
     ret = call;
   } else {
