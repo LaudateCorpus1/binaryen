@@ -13,7 +13,7 @@ for asm in sorted(os.listdir('test')):
         cmd = [os.path.join('bin', 'asm2wasm'), os.path.join('test', asm)]
         wasm = asm.replace('.asm.js', '.fromasm')
         if not precise:
-          cmd += ['--imprecise']
+          cmd += ['--imprecise', '--ignore-implicit-traps']
           wasm += '.imprecise'
         if not opts:
           wasm += '.no-opts'
@@ -21,6 +21,8 @@ for asm in sorted(os.listdir('test')):
             cmd += ['-O0'] # test that -O0 does nothing
         else:
           cmd += ['-O']
+        if 'debugInfo' in asm:
+          cmd += ['-g']
         if precise and opts:
           # test mem init importing
           open('a.mem', 'wb').write(asm)
@@ -172,10 +174,11 @@ for t in os.listdir('test'):
   if t.endswith('.wast') and not t.startswith('spec'):
     print '..', t
     t = os.path.join('test', t)
+    f = t + '.from-wast'
     cmd = [os.path.join('bin', 'wasm-opt'), t, '--print']
     actual = run_command(cmd)
     actual = actual.replace('printing before:\n', '')
-    open(t, 'w').write(actual)
+    open(f, 'w').write(actual)
 
 print '\n[ checking wasm-dis on provided binaries... ]\n'
 

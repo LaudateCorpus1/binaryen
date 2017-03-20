@@ -44,6 +44,7 @@ struct Pattern {
   Pattern(Expression* input, Expression* output) : input(input), output(output) {}
 };
 
+#if 0
 // Database of patterns
 struct PatternDatabase {
   Module wasm;
@@ -87,6 +88,7 @@ struct DatabaseEnsurer {
     database = new PatternDatabase;
   }
 };
+#endif
 
 // Check for matches and apply them
 struct Match {
@@ -103,61 +105,63 @@ struct Match {
   bool check(Expression* seen) {
     // compare seen to the pattern input, doing a special operation for our "wildcards"
     assert(wildcards.size() == 0);
-    return ExpressionAnalyzer::flexibleEqual(pattern.input, seen, *this);
+    auto compare = [this](Expression* subInput, Expression* subSeen) {
+      CallImport* call = subInput->dynCast<CallImport>();
+      if (!call || call->operands.size() != 1 || call->operands[0]->type != i32 || !call->operands[0]->is<Const>()) return false;
+      Index index = call->operands[0]->cast<Const>()->value.geti32();
+      // handle our special functions
+      auto checkMatch = [&](WasmType type) {
+        if (type != none && subSeen->type != type) return false;
+        while (index >= wildcards.size()) {
+          wildcards.push_back(nullptr);
+        }
+        if (!wildcards[index]) {
+          // new wildcard
+          wildcards[index] = subSeen; // NB: no need to copy
+          return true;
+        } else {
+          // We are seeing this index for a second or later time, check it matches
+          return ExpressionAnalyzer::equal(subSeen, wildcards[index]);
+        };
+      };
+      if (call->target == I32_EXPR) {
+        if (checkMatch(i32)) return true;
+      } else if (call->target == I64_EXPR) {
+        if (checkMatch(i64)) return true;
+      } else if (call->target == F32_EXPR) {
+        if (checkMatch(f32)) return true;
+      } else if (call->target == F64_EXPR) {
+        if (checkMatch(f64)) return true;
+      } else if (call->target == ANY_EXPR) {
+        if (checkMatch(none)) return true;
+      }
+      return false;
+    };
+
+    return ExpressionAnalyzer::flexibleEqual(pattern.input, seen, compare);
   }
 
-  bool compare(Expression* subInput, Expression* subSeen) {
-    CallImport* call = subInput->dynCast<CallImport>();
-    if (!call || call->operands.size() != 1 || call->operands[0]->type != i32 || !call->operands[0]->is<Const>()) return false;
-    Index index = call->operands[0]->cast<Const>()->value.geti32();
-    // handle our special functions
-    auto checkMatch = [&](WasmType type) {
-      if (type != none && subSeen->type != type) return false;
-      while (index >= wildcards.size()) {
-        wildcards.push_back(nullptr);
-      }
-      if (!wildcards[index]) {
-        // new wildcard
-        wildcards[index] = subSeen; // NB: no need to copy
-        return true;
-      } else {
-        // We are seeing this index for a second or later time, check it matches
-        return ExpressionAnalyzer::equal(subSeen, wildcards[index]);
-      };
-    };
-    if (call->target == I32_EXPR) {
-      if (checkMatch(i32)) return true;
-    } else if (call->target == I64_EXPR) {
-      if (checkMatch(i64)) return true;
-    } else if (call->target == F32_EXPR) {
-      if (checkMatch(f32)) return true;
-    } else if (call->target == F64_EXPR) {
-      if (checkMatch(f64)) return true;
-    } else if (call->target == ANY_EXPR) {
-      if (checkMatch(none)) return true;
-    }
-    return false;
-  }
 
   // Applying/copying
 
   // Apply the match, generate an output expression from the matched input, performing substitutions as necessary
   Expression* apply() {
-    return ExpressionManipulator::flexibleCopy(pattern.output, wasm, *this);
+    // When copying a wildcard, perform the substitution.
+    // TODO: we can reuse nodes, not copying a wildcard when it appears just once, and we can reuse other individual nodes when they are discarded anyhow.
+    auto copy = [this](Expression* curr) -> Expression* {
+      CallImport* call = curr->dynCast<CallImport>();
+      if (!call || call->operands.size() != 1 || call->operands[0]->type != i32 || !call->operands[0]->is<Const>()) return nullptr;
+      Index index = call->operands[0]->cast<Const>()->value.geti32();
+      // handle our special functions
+      if (call->target == I32_EXPR || call->target == I64_EXPR || call->target == F32_EXPR || call->target == F64_EXPR || call->target == ANY_EXPR) {
+        return ExpressionManipulator::copy(wildcards.at(index), wasm);
+      }
+      return nullptr;
+    };
+    return ExpressionManipulator::flexibleCopy(pattern.output, wasm, copy);
   }
 
-  // When copying a wildcard, perform the substitution.
-  // TODO: we can reuse nodes, not copying a wildcard when it appears just once, and we can reuse other individual nodes when they are discarded anyhow.
-  Expression* copy(Expression* curr) {
-    CallImport* call = curr->dynCast<CallImport>();
-    if (!call || call->operands.size() != 1 || call->operands[0]->type != i32 || !call->operands[0]->is<Const>()) return nullptr;
-    Index index = call->operands[0]->cast<Const>()->value.geti32();
-    // handle our special functions
-    if (call->target == I32_EXPR || call->target == I64_EXPR || call->target == F32_EXPR || call->target == F64_EXPR || call->target == ANY_EXPR) {
-      return ExpressionManipulator::copy(wildcards.at(index), wasm);
-    }
-    return nullptr;
-  }
+
 };
 
 // Main pass class
@@ -167,7 +171,9 @@ struct OptimizeInstructions : public WalkerPass<PostWalker<OptimizeInstructions,
   Pass* create() override { return new OptimizeInstructions; }
 
   void prepareToRun(PassRunner* runner, Module* module) override {
+#if 0
     static DatabaseEnsurer ensurer;
+#endif
   }
 
   void visitExpression(Expression* curr) {
@@ -179,6 +185,7 @@ struct OptimizeInstructions : public WalkerPass<PostWalker<OptimizeInstructions,
         replaceCurrent(curr);
         continue;
       }
+#if 0
       auto iter = database->patternMap.find(curr->_id);
       if (iter == database->patternMap.end()) return;
       auto& patterns = iter->second;
@@ -193,6 +200,9 @@ struct OptimizeInstructions : public WalkerPass<PostWalker<OptimizeInstructions,
         }
       }
       if (!more) break;
+#else
+      break;
+#endif
     }
   }
 
@@ -315,8 +325,8 @@ struct OptimizeInstructions : public WalkerPass<PostWalker<OptimizeInstructions,
       auto* condition = select->condition->dynCast<Unary>();
       if (condition && condition->op == EqZInt32) {
         // flip select to remove eqz, if we can reorder
-        EffectAnalyzer ifTrue(select->ifTrue);
-        EffectAnalyzer ifFalse(select->ifFalse);
+        EffectAnalyzer ifTrue(getPassOptions(), select->ifTrue);
+        EffectAnalyzer ifFalse(getPassOptions(), select->ifFalse);
         if (!ifTrue.invalidates(ifFalse)) {
           select->condition = condition->value;
           std::swap(select->ifTrue, select->ifFalse);
@@ -406,8 +416,8 @@ private:
     auto* left = binary->left;
     auto* right = binary->right;
     if (!Properties::emitsBoolean(left) || !Properties::emitsBoolean(right)) return nullptr;
-    auto leftEffects = EffectAnalyzer(left).hasSideEffects();
-    auto rightEffects = EffectAnalyzer(right).hasSideEffects();
+    auto leftEffects = EffectAnalyzer(getPassOptions(), left).hasSideEffects();
+    auto rightEffects = EffectAnalyzer(getPassOptions(), right).hasSideEffects();
     if (leftEffects && rightEffects) return nullptr; // both must execute
    // canonicalize with side effects, if any, happening on the left
     if (rightEffects) {

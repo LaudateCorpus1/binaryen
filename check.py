@@ -99,7 +99,7 @@ for asm in tests:
         cmd = ASM2WASM + [os.path.join(options.binaryen_test, asm)]
         wasm = asm.replace('.asm.js', '.fromasm')
         if not precise:
-          cmd += ['--imprecise']
+          cmd += ['--imprecise', '--ignore-implicit-traps']
           wasm += '.imprecise'
         if not opts:
           wasm += '.no-opts'
@@ -107,6 +107,8 @@ for asm in tests:
             cmd += ['-O0'] # test that -O0 does nothing
         else:
           cmd += ['-O']
+        if 'debugInfo' in asm:
+          cmd += ['-g']
         if precise and opts:
           # test mem init importing
           open('a.mem', 'wb').write(asm)
@@ -182,11 +184,12 @@ for t in tests:
   if t.endswith('.wast') and not t.startswith('spec'):
     print '..', t
     t = os.path.join(options.binaryen_test, t)
+    f = t + '.from-wast'
     cmd = WASM_OPT + [t, '--print']
     actual = run_command(cmd)
     actual = actual.replace('printing before:\n', '')
 
-    expected = open(t, 'rb').read()
+    expected = open(f, 'rb').read()
     if actual != expected:
       fail(actual, expected)
 
