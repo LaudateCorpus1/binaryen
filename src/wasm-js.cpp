@@ -59,6 +59,7 @@ extern "C" void EMSCRIPTEN_KEEPALIVE load_asm2wasm(char *input) {
   prepare2wasm();
 
   Asm2WasmPreProcessor pre;
+  pre.debugInfo = true; // FIXME: we must do this, as the input asm.js might have debug info
   input = pre.process(input);
 
   // proceed to parse and wasmify
@@ -79,7 +80,7 @@ extern "C" void EMSCRIPTEN_KEEPALIVE load_asm2wasm(char *input) {
   module->memory.max = pre.memoryGrowth ? Address(Memory::kMaxSize) : module->memory.initial;
 
   if (wasmJSDebug) std::cerr << "wasming...\n";
-  asm2wasm = new Asm2WasmBuilder(*module, pre.memoryGrowth, debug, false /* TODO: support imprecise? */, PassOptions(), false /* TODO: support optimizing? */, false /* TODO: support asm2wasm-i64? */);
+  asm2wasm = new Asm2WasmBuilder(*module, pre, debug, Asm2WasmBuilder::TrapMode::JS, PassOptions(), false /* TODO: support optimizing? */, false /* TODO: support asm2wasm-i64? */);
   asm2wasm->processAsm(asmjs);
 }
 
@@ -92,7 +93,7 @@ void finalizeModule() {
     exit(EXIT_FAILURE);
   }
   module->memory.initial = Address(providedMemory / Memory::kPageSize);
-  module->memory.max = module->checkExport(GROW_WASM_MEMORY) ? Address(Memory::kMaxSize) : module->memory.initial;
+  module->memory.max = module->getExportOrNull(GROW_WASM_MEMORY) ? Address(Memory::kMaxSize) : module->memory.initial;
 
   // global mapping is done in js in post.js
 }
@@ -170,7 +171,10 @@ extern "C" void EMSCRIPTEN_KEEPALIVE instantiate() {
   if (wasmJSDebug) std::cerr << "creating instance...\n";
 
   struct JSExternalInterface : ModuleInstance::ExternalInterface {
+    Module* module = nullptr;
+
     void init(Module& wasm, ModuleInstance& instance) override {
+      module = &wasm;
       // look for imported memory
       {
         bool found = false;
@@ -228,7 +232,7 @@ extern "C" void EMSCRIPTEN_KEEPALIVE instantiate() {
         assert(offset + segment.data.size() <= wasm.table.initial);
         for (size_t i = 0; i != segment.data.size(); ++i) {
           Name name = segment.data[i];
-          auto* func = wasm.checkFunction(name);
+          auto* func = wasm.getFunctionOrNull(name);
           if (func) {
             EM_ASM_({
               Module['outside']['wasmTable'][$0] = $1;
@@ -301,7 +305,7 @@ extern "C" void EMSCRIPTEN_KEEPALIVE instantiate() {
 
       if (wasmJSDebug) std::cout << "calling import returning " << ret << '\n';
 
-      return getResultFromJS(ret, import->functionType->result);
+      return getResultFromJS(ret, module->getFunctionType(import->functionType)->result);
     }
 
     Literal callTable(Index index, LiteralList& arguments, WasmType result, ModuleInstance& instance) override {

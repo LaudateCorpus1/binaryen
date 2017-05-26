@@ -1,5 +1,6 @@
 PROJECT(binaryen C CXX)
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8.7)
+INCLUDE(GNUInstallDirs)
 
 IF(NOT CMAKE_BUILD_TYPE)
   MESSAGE(STATUS "No build type selected, default to Release")
@@ -84,6 +85,8 @@ IF(MSVC)
     endforeach()
   endif()
 
+  ADD_LINK_FLAG("/STACK:8388608")
+
   IF(RUN_STATIC_ANALYZER)
     ADD_DEFINITIONS(/analyze)
   ENDIF()
@@ -120,6 +123,7 @@ IF (UNIX AND
 ENDIF()
 
 # Static libraries
+ADD_SUBDIRECTORY(src/ast)
 ADD_SUBDIRECTORY(src/asmjs)
 ADD_SUBDIRECTORY(src/emscripten-optimizer)
 ADD_SUBDIRECTORY(src/passes)
@@ -138,13 +142,12 @@ IF(BUILD_STATIC_LIB)
 ELSE()
   ADD_LIBRARY(binaryen SHARED ${binaryen_SOURCES})
 ENDIF()
-TARGET_LINK_LIBRARIES(binaryen ${all_passes} wasm asmjs support)
-INSTALL(TARGETS binaryen DESTINATION lib)
+TARGET_LINK_LIBRARIES(binaryen ${all_passes} wasm asmjs ast support)
+INSTALL(TARGETS binaryen DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-INSTALL(FILES src/binaryen-c.h DESTINATION include)
-INSTALL(FILES bin/wasm.js DESTINATION bin)
-INSTALL(FILES bin/binaryen.js DESTINATION bin)
-INSTALL(DIRECTORY src/js DESTINATION src)
+INSTALL(FILES src/binaryen-c.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+INSTALL(FILES bin/wasm.js DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
+INSTALL(FILES bin/binaryen.js DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
 
 SET(wasm-shell_SOURCES
   src/tools/wasm-shell.cpp
@@ -152,20 +155,30 @@ SET(wasm-shell_SOURCES
 )
 ADD_EXECUTABLE(wasm-shell
                ${wasm-shell_SOURCES})
-TARGET_LINK_LIBRARIES(wasm-shell wasm asmjs emscripten-optimizer ${all_passes} support)
+TARGET_LINK_LIBRARIES(wasm-shell wasm asmjs emscripten-optimizer ${all_passes} ast support)
 SET_PROPERTY(TARGET wasm-shell PROPERTY CXX_STANDARD 11)
 SET_PROPERTY(TARGET wasm-shell PROPERTY CXX_STANDARD_REQUIRED ON)
-INSTALL(TARGETS wasm-shell DESTINATION bin)
+INSTALL(TARGETS wasm-shell DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 SET(wasm-opt_SOURCES
   src/tools/wasm-opt.cpp
 )
 ADD_EXECUTABLE(wasm-opt
                ${wasm-opt_SOURCES})
-TARGET_LINK_LIBRARIES(wasm-opt wasm asmjs emscripten-optimizer ${all_passes} support)
+TARGET_LINK_LIBRARIES(wasm-opt wasm asmjs emscripten-optimizer ${all_passes} ast support)
 SET_PROPERTY(TARGET wasm-opt PROPERTY CXX_STANDARD 11)
 SET_PROPERTY(TARGET wasm-opt PROPERTY CXX_STANDARD_REQUIRED ON)
-INSTALL(TARGETS wasm-opt DESTINATION bin)
+INSTALL(TARGETS wasm-opt DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+SET(wasm-merge_SOURCES
+  src/tools/wasm-merge.cpp
+)
+ADD_EXECUTABLE(wasm-merge
+               ${wasm-merge_SOURCES})
+TARGET_LINK_LIBRARIES(wasm-merge wasm asmjs emscripten-optimizer ${all_passes} ast support)
+SET_PROPERTY(TARGET wasm-merge PROPERTY CXX_STANDARD 11)
+SET_PROPERTY(TARGET wasm-merge PROPERTY CXX_STANDARD_REQUIRED ON)
+INSTALL(TARGETS wasm-merge DESTINATION bin)
 
 SET(asm2wasm_SOURCES
   src/tools/asm2wasm.cpp
@@ -173,10 +186,10 @@ SET(asm2wasm_SOURCES
 )
 ADD_EXECUTABLE(asm2wasm
                ${asm2wasm_SOURCES})
-TARGET_LINK_LIBRARIES(asm2wasm emscripten-optimizer ${all_passes} wasm asmjs support)
+TARGET_LINK_LIBRARIES(asm2wasm emscripten-optimizer ${all_passes} wasm asmjs ast support)
 SET_PROPERTY(TARGET asm2wasm PROPERTY CXX_STANDARD 11)
 SET_PROPERTY(TARGET asm2wasm PROPERTY CXX_STANDARD_REQUIRED ON)
-INSTALL(TARGETS asm2wasm DESTINATION bin)
+INSTALL(TARGETS asm2wasm DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 SET(s2wasm_SOURCES
   src/tools/s2wasm.cpp
@@ -185,27 +198,27 @@ SET(s2wasm_SOURCES
 )
 ADD_EXECUTABLE(s2wasm
                ${s2wasm_SOURCES})
-TARGET_LINK_LIBRARIES(s2wasm passes wasm asmjs support)
+TARGET_LINK_LIBRARIES(s2wasm passes wasm asmjs ast support)
 SET_PROPERTY(TARGET s2wasm PROPERTY CXX_STANDARD 11)
 SET_PROPERTY(TARGET s2wasm PROPERTY CXX_STANDARD_REQUIRED ON)
-INSTALL(TARGETS s2wasm DESTINATION bin)
+INSTALL(TARGETS s2wasm DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 SET(wasm_as_SOURCES
   src/tools/wasm-as.cpp
 )
 ADD_EXECUTABLE(wasm-as
                ${wasm_as_SOURCES})
-TARGET_LINK_LIBRARIES(wasm-as wasm asmjs passes support)
+TARGET_LINK_LIBRARIES(wasm-as wasm asmjs passes ast support)
 SET_PROPERTY(TARGET wasm-as PROPERTY CXX_STANDARD 11)
 SET_PROPERTY(TARGET wasm-as PROPERTY CXX_STANDARD_REQUIRED ON)
-INSTALL(TARGETS wasm-as DESTINATION bin)
+INSTALL(TARGETS wasm-as DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 SET(wasm_dis_SOURCES
   src/tools/wasm-dis.cpp
 )
 ADD_EXECUTABLE(wasm-dis
                ${wasm_dis_SOURCES})
-TARGET_LINK_LIBRARIES(wasm-dis passes wasm asmjs support)
+TARGET_LINK_LIBRARIES(wasm-dis passes wasm asmjs ast support)
 SET_PROPERTY(TARGET wasm-dis PROPERTY CXX_STANDARD 11)
 SET_PROPERTY(TARGET wasm-dis PROPERTY CXX_STANDARD_REQUIRED ON)
-INSTALL(TARGETS wasm-dis DESTINATION bin)
+INSTALL(TARGETS wasm-dis DESTINATION ${CMAKE_INSTALL_BINDIR})

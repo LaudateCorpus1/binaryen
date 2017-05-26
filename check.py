@@ -94,19 +94,24 @@ print '[ checking asm2wasm testcases... ]\n'
 
 for asm in tests:
   if asm.endswith('.asm.js'):
-    for precise in [1, 0]:
+    for precise in [0, 1, 2]:
       for opts in [1, 0]:
         cmd = ASM2WASM + [os.path.join(options.binaryen_test, asm)]
         wasm = asm.replace('.asm.js', '.fromasm')
         if not precise:
-          cmd += ['--imprecise']
+          cmd += ['--emit-potential-traps', '--ignore-implicit-traps']
           wasm += '.imprecise'
+        elif precise == 2:
+          cmd += ['--emit-clamped-potential-traps']
+          wasm += '.clamp'
         if not opts:
           wasm += '.no-opts'
           if precise:
             cmd += ['-O0'] # test that -O0 does nothing
         else:
           cmd += ['-O']
+        if 'debugInfo' in asm:
+          cmd += ['-g']
         if precise and opts:
           # test mem init importing
           open('a.mem', 'wb').write(asm)
@@ -182,11 +187,12 @@ for t in tests:
   if t.endswith('.wast') and not t.startswith('spec'):
     print '..', t
     t = os.path.join(options.binaryen_test, t)
+    f = t + '.from-wast'
     cmd = WASM_OPT + [t, '--print']
     actual = run_command(cmd)
     actual = actual.replace('printing before:\n', '')
 
-    expected = open(t, 'rb').read()
+    expected = open(f, 'rb').read()
     if actual != expected:
       fail(actual, expected)
 
@@ -208,6 +214,28 @@ for t in tests:
       expected = f.read()
       if actual != expected:
         fail(actual, expected)
+
+print '\n[ checking wasm-merge... ]\n'
+
+for t in os.listdir(os.path.join('test', 'merge')):
+  if t.endswith(('.wast', '.wasm')):
+    print '..', t
+    t = os.path.join('test', 'merge', t)
+    u = t + '.toMerge'
+    for finalize in [0, 1]:
+      for opt in [0, 1]:
+        cmd = [os.path.join('bin', 'wasm-merge'), t, u, '-o', 'a.wast', '-S', '--verbose']
+        if finalize: cmd += ['--finalize-memory-base=1024', '--finalize-table-base=8']
+        if opt: cmd += ['-O']
+        stdout = run_command(cmd)
+        actual = open('a.wast').read()
+        out = t + '.combined'
+        if finalize: out += '.finalized'
+        if opt: out += '.opt'
+        with open(out) as f:
+          fail_if_not_identical(f.read(), actual)
+        with open(out + '.stdout') as f:
+          fail_if_not_identical(f.read(), stdout)
 
 print '\n[ checking wasm-shell spec testcases... ]\n'
 
@@ -297,7 +325,7 @@ for t in spec_tests:
       # compare all the outputs to the expected output
       check_expected(actual, os.path.join(options.binaryen_test, 'spec', 'expected-output', os.path.basename(wast) + '.log'))
 
-if NODEJS:
+if MOZJS:
   print '\n[ checking binaryen.js testcases... ]\n'
 
   for s in sorted(os.listdir(os.path.join(options.binaryen_test, 'binaryen.js'))):
@@ -307,8 +335,8 @@ if NODEJS:
     f.write(open(os.path.join(options.binaryen_bin, 'binaryen.js')).read())
     f.write(open(os.path.join(options.binaryen_test, 'binaryen.js', s)).read())
     f.close()
-    cmd = [NODEJS, 'a.js']
-    out = run_command(cmd)
+    cmd = [MOZJS, 'a.js']
+    out = run_command(cmd, stderr=subprocess.STDOUT)
     expected = open(os.path.join(options.binaryen_test, 'binaryen.js', s + '.txt')).read()
     if expected not in out:
       fail(out, expected)
@@ -548,6 +576,7 @@ if EMCC:
         for method in ['interpret-asm2wasm', 'interpret-s-expr', 'interpret-binary']:
           command = [EMCC, '-o', 'a.wasm.js', '-s', 'BINARYEN=1', os.path.join(options.binaryen_test, c)] + opts + extra
           command += ['-s', 'BINARYEN_METHOD="' + method + '"']
+          command += ['-s', 'BINARYEN_TRAP_MODE="js"']
           print '....' + ' '.join(command)
           subprocess.check_call(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
           if post:

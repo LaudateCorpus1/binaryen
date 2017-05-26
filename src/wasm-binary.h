@@ -22,7 +22,6 @@
 #define wasm_wasm_binary_h
 
 #include <cassert>
-#include <istream>
 #include <ostream>
 #include <type_traits>
 
@@ -270,7 +269,7 @@ namespace BinaryConsts {
 
 enum Meta {
   Magic = 0x6d736100,
-  Version = 0x0d
+  Version = 0x01
 };
 
 enum Section {
@@ -304,6 +303,11 @@ enum EncodedType {
 
 namespace UserSections {
 extern const char* Name;
+
+enum Subsection {
+  NameFunction = 1,
+  NameLocal = 2,
+};
 }
 
 enum ASTNodes {
@@ -546,6 +550,8 @@ public:
   void writeResizableLimits(Address initial, Address maximum, bool hasMaximum);
   int32_t startSection(BinaryConsts::Section code);
   void finishSection(int32_t start);
+  int32_t startSubsection(BinaryConsts::UserSections::Subsection code);
+  void finishSubsection(int32_t start);
   void writeStart();
   void writeMemory();
   void writeTypes();
@@ -638,7 +644,7 @@ public:
   WasmBinaryBuilder(Module& wasm, std::vector<char>& input, bool debug) : wasm(wasm), allocator(wasm.allocator), input(input), debug(debug) {}
 
   void read();
-  void readUserSection();
+  void readUserSection(size_t payloadLen);
   bool more() { return pos < input.size();}
 
   uint8_t getInt8();
@@ -722,7 +728,7 @@ public:
 
   void readFunctionTableDeclaration();
   void readTableElements();
-  void readNames();
+  void readNames(size_t);
 
   // AST reading
   int depth = 0; // only for debugging

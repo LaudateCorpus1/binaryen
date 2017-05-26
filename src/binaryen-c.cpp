@@ -194,7 +194,7 @@ BinaryenOp BinaryenNearestFloat64(void) { return NearestFloat64; }
 BinaryenOp BinaryenSqrtFloat64(void) { return SqrtFloat64; }
 BinaryenOp BinaryenEqZInt64(void) { return EqZInt64; }
 BinaryenOp BinaryenExtendSInt32(void) { return ExtendSInt32; }
-BinaryenOp BinaryenExtentUInt32(void) { return ExtendUInt32; }
+BinaryenOp BinaryenExtendUInt32(void) { return ExtendUInt32; }
 BinaryenOp BinaryenWrapInt64(void) { return WrapInt64; }
 BinaryenOp BinaryenTruncSFloat32ToInt32(void) { return TruncSFloat32ToInt32; }
 BinaryenOp BinaryenTruncSFloat32ToInt64(void) { return TruncSFloat32ToInt64; }
@@ -718,7 +718,7 @@ BinaryenImportRef BinaryenAddImport(BinaryenModuleRef module, const char* intern
   ret->name = internalName;
   ret->module = externalModuleName;
   ret->base = externalBaseName;
-  ret->functionType = (FunctionType*)type;
+  ret->functionType = ((FunctionType*)type)->name;
   ret->kind = ExternalKind::Function;
   wasm->addImport(ret);
   return ret;

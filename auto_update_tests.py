@@ -8,19 +8,24 @@ print '[ processing and updating testcases... ]\n'
 
 for asm in sorted(os.listdir('test')):
   if asm.endswith('.asm.js'):
-    for precise in [1, 0]:
+    for precise in [0, 1, 2]:
       for opts in [1, 0]:
         cmd = [os.path.join('bin', 'asm2wasm'), os.path.join('test', asm)]
         wasm = asm.replace('.asm.js', '.fromasm')
         if not precise:
-          cmd += ['--imprecise']
+          cmd += ['--emit-potential-traps', '--ignore-implicit-traps']
           wasm += '.imprecise'
+        elif precise == 2:
+          cmd += ['--emit-clamped-potential-traps']
+          wasm += '.clamp'
         if not opts:
           wasm += '.no-opts'
           if precise:
             cmd += ['-O0'] # test that -O0 does nothing
         else:
           cmd += ['-O']
+        if 'debugInfo' in asm:
+          cmd += ['-g']
         if precise and opts:
           # test mem init importing
           open('a.mem', 'wb').write(asm)
@@ -29,8 +34,7 @@ for asm in sorted(os.listdir('test')):
             cmd += ['--mem-base=1024']
         if 'i64' in asm or 'wasm-only' in asm:
           cmd += ['--wasm-only']
-        print '..', asm, wasm
-        print '    ', ' '.join(cmd)
+        print ' '.join(cmd)
         actual = run_command(cmd)
         with open(os.path.join('test', wasm), 'w') as o: o.write(actual)
 
@@ -172,10 +176,11 @@ for t in os.listdir('test'):
   if t.endswith('.wast') and not t.startswith('spec'):
     print '..', t
     t = os.path.join('test', t)
+    f = t + '.from-wast'
     cmd = [os.path.join('bin', 'wasm-opt'), t, '--print']
     actual = run_command(cmd)
     actual = actual.replace('printing before:\n', '')
-    open(t, 'w').write(actual)
+    open(f, 'w').write(actual)
 
 print '\n[ checking wasm-dis on provided binaries... ]\n'
 
@@ -187,5 +192,38 @@ for t in os.listdir('test'):
     actual = run_command(cmd)
 
     open(t + '.fromBinary', 'w').write(actual)
+
+print '\n[ checking wasm-merge... ]\n'
+
+for t in os.listdir(os.path.join('test', 'merge')):
+  if t.endswith(('.wast', '.wasm')):
+    print '..', t
+    t = os.path.join('test', 'merge', t)
+    u = t + '.toMerge'
+    for finalize in [0, 1]:
+      for opt in [0, 1]:
+        cmd = [os.path.join('bin', 'wasm-merge'), t, u, '-o', 'a.wast', '-S', '--verbose']
+        if finalize: cmd += ['--finalize-memory-base=1024', '--finalize-table-base=8']
+        if opt: cmd += ['-O']
+        stdout = run_command(cmd)
+        actual = open('a.wast').read()
+        out = t + '.combined'
+        if finalize: out += '.finalized'
+        if opt: out += '.opt'
+        with open(out, 'w') as o: o.write(actual)
+        with open(out + '.stdout', 'w') as o: o.write(stdout)
+
+print '\n[ checking binaryen.js testcases... ]\n'
+
+for s in sorted(os.listdir(os.path.join('test', 'binaryen.js'))):
+  if not s.endswith('.js'): continue
+  print s
+  f = open('a.js', 'w')
+  f.write(open(os.path.join('bin', 'binaryen.js')).read())
+  f.write(open(os.path.join('test', 'binaryen.js', s)).read())
+  f.close()
+  cmd = ['mozjs', 'a.js']
+  out = run_command(cmd, stderr=subprocess.STDOUT)
+  open(os.path.join('test', 'binaryen.js', s + '.txt'), 'w').write(out)
 
 print '\n[ success! ]'

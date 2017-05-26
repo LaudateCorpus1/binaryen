@@ -90,6 +90,7 @@ static wasm::Expression* HandleFollowupMultiples(wasm::Expression* Ret, Shape* P
       }
     }
   }
+  Curr->finalize();
   return Curr;
 }
 
@@ -250,6 +251,7 @@ wasm::Expression* Block::Render(RelooperBuilder& Builder, bool InLoop) {
             Root = Now;
           } else {
             CurrIf->ifFalse = Now;
+            CurrIf->finalize();
           }
         } else {
           auto* Now = Builder.makeIf(Details->Condition, CurrContent);
@@ -258,6 +260,7 @@ wasm::Expression* Block::Render(RelooperBuilder& Builder, bool InLoop) {
             Root = CurrIf = Now;
           } else {
             CurrIf->ifFalse = Now;
+            CurrIf->finalize();
             CurrIf = Now;
           }
         }
@@ -370,6 +373,7 @@ wasm::Expression* MultipleShape::Render(RelooperBuilder& Builder, bool InLoop) {
       FirstIf = CurrIf = Now;
     } else {
       CurrIf->ifFalse = Now;
+      CurrIf->finalize();
       CurrIf = Now;
     }
   }

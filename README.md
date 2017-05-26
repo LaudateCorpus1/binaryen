@@ -34,8 +34,9 @@ Binaryen's internal IR is an AST, designed to be
 
 The differences between Binaryen IR and WebAssembly are:
 
- * Binaryen IR [is an AST](https://github.com/WebAssembly/binaryen/issues/663). This differs from the WebAssembly binary format which is a stack machine.
- * Binaryen IR requires the names of blocks and loops to be unique. This differs from the WebAssembly s-expression format which allows duplicate names (and depends on scoping to disambiguate).
+ * Binaryen IR [is an AST](https://github.com/WebAssembly/binaryen/issues/663), for convenience of optimization. This differs from the WebAssembly binary format which is a stack machine.
+ * WebAssembly limits block/if/loop types to none and the concrete value types (i32, i64, f32, f64). Binaryen IR has an unreachable type, and it allows block/if/loop to take it, allowing [local transforms that don't need to know the global context](https://github.com/WebAssembly/binaryen/issues/903).
+ * Binaryen IR's text format requires the names of blocks and loops to be unique. This differs from the WebAssembly s-expression format which allows duplicate names (and depends on scoping to disambiguate).
 
 As a result, you might notice that round-trip conversions (wasm => Binaryen IR => wasm) change code a little in some corner cases.
 
@@ -50,7 +51,7 @@ This repository contains code that builds the following tools in `bin/`:
  * **asm2wasm**: An asm.js-to-WebAssembly compiler, using Emscripten's asm optimizer infrastructure. This is used by Emscripten in Binaryen mode when it uses Emscripten's fastcomp asm.js backend.
  * **s2wasm**: A compiler from the `.s` format emitted by the new WebAssembly backend being developed in LLVM. This is used by Emscripten in Binaryen mode when it integrates with the new LLVM backend.
  * **wasm.js**: wasm.js contains Binaryen components compiled to JavaScript, including the interpreter, `asm2wasm`, the S-Expression parser, etc., which allow you to use Binaryen with Emscripten and execute code compiled to WASM even if the browser doesn't have native support yet. This can be useful as a (slow) polyfill.
- * **binaryen.js**: A stand alone library that exposes Binaryen methods for [parsing s-expressions and instantiating WASM modules](https://github.com/WebAssembly/binaryen/blob/master/test/binaryen.js/test.js) in JavaScript.
+ * **binaryen.js**: A standalone JavaScript library that exposes Binaryen methods for [creating and optimizing WASM modules](https://github.com/WebAssembly/binaryen/blob/master/test/binaryen.js/test.js).
 
 Usage instructions for each are below.
 

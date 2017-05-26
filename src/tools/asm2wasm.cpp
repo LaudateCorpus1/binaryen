@@ -33,7 +33,7 @@ using namespace wasm;
 int main(int argc, const char *argv[]) {
   PassOptions passOptions;
   bool runOptimizationPasses = false;
-  bool imprecise = false;
+  Asm2WasmBuilder::TrapMode trapMode = Asm2WasmBuilder::TrapMode::JS;
   bool wasmOnly = false;
   bool debugInfo = false;
   std::string symbolMap;
@@ -76,15 +76,27 @@ int main(int argc, const char *argv[]) {
            [](Options *o, const std::string &) {
              std::cerr << "--no-opts is deprecated (use -O0, etc.)\n";
            })
-      .add("--imprecise", "-i", "Imprecise optimizations", Options::Arguments::Zero,
-           [&imprecise](Options *o, const std::string &) {
-             imprecise = true;
+      .add("--emit-potential-traps", "-i", "Emit instructions that might trap, like div/rem of 0", Options::Arguments::Zero,
+           [&trapMode](Options *o, const std::string &) {
+             trapMode = Asm2WasmBuilder::TrapMode::Allow;
+           })
+      .add("--emit-clamped-potential-traps", "-i", "Clamp instructions that might trap, like float => int", Options::Arguments::Zero,
+           [&trapMode](Options *o, const std::string &) {
+             trapMode = Asm2WasmBuilder::TrapMode::Clamp;
+           })
+      .add("--emit-jsified-potential-traps", "-i", "Avoid instructions that might trap, handling them exactly like JS would", Options::Arguments::Zero,
+           [&trapMode](Options *o, const std::string &) {
+             trapMode = Asm2WasmBuilder::TrapMode::JS;
+           })
+      .add("--imprecise", "-i", "Imprecise optimizations (old name for --emit-potential-traps)", Options::Arguments::Zero,
+           [&trapMode](Options *o, const std::string &) {
+             trapMode = Asm2WasmBuilder::TrapMode::Allow;
            })
       .add("--wasm-only", "-w", "Input is in WebAssembly-only format, and not actually valid asm.js", Options::Arguments::Zero,
            [&wasmOnly](Options *o, const std::string &) {
              wasmOnly = true;
            })
-      .add("--debuginfo", "-g", "Emit names section and debug info",
+      .add("--debuginfo", "-g", "Emit names section and debug info (for debug info you must emit text, -S, for this to work)",
            Options::Arguments::Zero,
            [&](Options *o, const std::string &arguments) { debugInfo = true; })
       .add("--symbolmap", "-s", "Emit a symbol map (indexes => names)",
@@ -99,6 +111,12 @@ int main(int argc, const char *argv[]) {
                       });
   options.parse(argc, argv);
 
+  // finalize arguments
+  if (options.extra["output"].size() == 0) {
+    // when no output file is specified, we emit text to stdout
+    emitBinary = false;
+  }
+
   const auto &tm_it = options.extra.find("total memory");
   size_t totalMemory =
       tm_it == options.extra.end() ? 16 * 1024 * 1024 : atoi(tm_it->second.c_str());
@@ -109,6 +127,8 @@ int main(int argc, const char *argv[]) {
   }
 
   Asm2WasmPreProcessor pre;
+  // wasm binaries can contain a names section, but not full debug info
+  pre.debugInfo = debugInfo && !emitBinary;
   auto input(
       read_file<std::vector<char>>(options.extra["infile"], Flags::Text, options.debug ? Flags::Debug : Flags::Release));
   char *start = pre.process(input.data());
@@ -120,7 +140,7 @@ int main(int argc, const char *argv[]) {
   if (options.debug) std::cerr << "wasming..." << std::endl;
   Module wasm;
   wasm.memory.initial = wasm.memory.max = totalMemory / Memory::kPageSize;
-  Asm2WasmBuilder asm2wasm(wasm, pre.memoryGrowth, options.debug, imprecise, passOptions, runOptimizationPasses, wasmOnly);
+  Asm2WasmBuilder asm2wasm(wasm, pre, options.debug, trapMode, passOptions, runOptimizationPasses, wasmOnly);
   asm2wasm.processAsm(asmjs);
 
   // import mem init file, if provided

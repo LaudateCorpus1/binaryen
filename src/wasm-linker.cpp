@@ -49,18 +49,18 @@ void Linker::placeStackPointer(Address stackAllocation) {
 }
 
 void Linker::ensureFunctionImport(Name target, std::string signature) {
-  if (!out.wasm.checkImport(target)) {
+  if (!out.wasm.getImportOrNull(target)) {
     auto import = new Import;
     import->name = import->base = target;
     import->module = ENV;
-    import->functionType = ensureFunctionType(signature, &out.wasm);
+    import->functionType = ensureFunctionType(signature, &out.wasm)->name;
     import->kind = ExternalKind::Function;
     out.wasm.addImport(import);
   }
 }
 
 void Linker::ensureObjectImport(Name target) {
-  if (!out.wasm.checkImport(target)) {
+  if (!out.wasm.getImportOrNull(target)) {
     auto import = new Import;
     import->name = import->base = target;
     import->module = ENV;
@@ -82,11 +82,12 @@ void Linker::layout() {
     // behavior.
     for (auto* call : f.second) {
       auto type = call->type;
-      auto operands = std::move(call->operands);
+      ExpressionList operands(out.wasm.allocator);
+      operands.swap(call->operands);
       auto target = call->target;
       CallImport* newCall = ExpressionManipulator::convert<Call, CallImport>(call, out.wasm.allocator);
       newCall->type = type;
-      newCall->operands = std::move(operands);
+      newCall->operands.swap(operands);
       newCall->target = target;
     }
   }
@@ -194,7 +195,7 @@ void Linker::layout() {
       if (debug) std::cerr << "  ==> " << *(relocation->data) << '\n';
     } else {
       // function address
-      if (!out.wasm.checkFunction(name)) {
+      if (!out.wasm.getFunctionOrNull(name)) {
         if (FunctionType* f = out.getExternType(name)) {
           // Address of an imported function is taken, but imports do not have addresses in wasm.
           // Generate a thunk to forward to the call_import.
@@ -336,7 +337,8 @@ void Linker::emscriptenGlue(std::ostream& o) {
   }
 
   auto functionsToThunk = getTableData();
-  std::remove(functionsToThunk.begin(), functionsToThunk.end(), dummyFunction);
+  auto removeIt = std::remove(functionsToThunk.begin(), functionsToThunk.end(), dummyFunction);
+  functionsToThunk.erase(removeIt, functionsToThunk.end());
   for (auto f : emscripten::makeDynCallThunks(out.wasm, functionsToThunk)) {
     exportFunction(f->name, true);
   }
@@ -397,7 +399,7 @@ void Linker::makeDummyFunction() {
 
 Function* Linker::getImportThunk(Name name, const FunctionType* funcType) {
   Name thunkName = std::string("__importThunk_") + name.c_str();
-  if (Function* thunk = out.wasm.checkFunction(thunkName)) return thunk;
+  if (Function* thunk = out.wasm.getFunctionOrNull(thunkName)) return thunk;
   ensureFunctionImport(name, getSig(funcType));
   wasm::Builder wasmBuilder(out.wasm);
   std::vector<NameType> params;

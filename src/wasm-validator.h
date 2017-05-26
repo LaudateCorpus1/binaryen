@@ -39,12 +39,13 @@
 
 #include <set>
 
+#include "support/colors.h"
 #include "wasm.h"
 #include "wasm-printing.h"
 
 namespace wasm {
 
-struct WasmValidator : public PostWalker<WasmValidator, Visitor<WasmValidator>> {
+struct WasmValidator : public PostWalker<WasmValidator> {
   bool valid = true;
 
   // what to validate, see comment up top
@@ -128,7 +129,9 @@ public:
       }
     }
     if (!isConcreteWasmType(curr->type) && curr->list.size() > 0) {
-      shouldBeFalse(isConcreteWasmType(curr->list.back()->type), curr, "block with no value cannot have a last element with a value");
+      if (isConcreteWasmType(curr->list.back()->type)) {
+        shouldBeTrue(curr->type == unreachable, curr, "block with no value and a last element with a value must be unreachable");
+      }
     }
   }
 
@@ -155,12 +158,25 @@ public:
     shouldBeTrue(curr->condition->type == unreachable || curr->condition->type == i32 || curr->condition->type == i64, curr, "if condition must be valid");
     if (!curr->ifFalse) {
       shouldBeFalse(isConcreteWasmType(curr->ifTrue->type), curr, "if without else must not return a value in body");
+      if (curr->condition->type != unreachable) {
+        shouldBeEqual(curr->type, none, curr, "if without else and reachable condition must be none");
+      }
+    } else {
+      if (curr->type != unreachable) {
+        shouldBeEqualOrFirstIsUnreachable(curr->ifTrue->type, curr->type, curr, "returning if-else's true must have right type");
+        shouldBeEqualOrFirstIsUnreachable(curr->ifFalse->type, curr->type, curr, "returning if-else's false must have right type");
+      } else {
+        if (curr->condition->type != unreachable) {
+          shouldBeEqual(curr->ifTrue->type, unreachable, curr, "unreachable if-else must have unreachable true");
+          shouldBeEqual(curr->ifFalse->type, unreachable, curr, "unreachable if-else must have unreachable false");
+        }
+      }
     }
   }
 
   // override scan to add a pre and a post check task to all nodes
   static void scan(WasmValidator* self, Expression** currp) {
-    PostWalker<WasmValidator, Visitor<WasmValidator>>::scan(self, currp);
+    PostWalker<WasmValidator>::scan(self, currp);
 
     auto* curr = *currp;
     if (curr->is<Block>()) self->pushTask(visitPreBlock, currp);
@@ -208,7 +224,7 @@ public:
   }
   void visitCall(Call *curr) {
     if (!validateGlobally) return;
-    auto* target = getModule()->checkFunction(curr->target);
+    auto* target = getModule()->getFunctionOrNull(curr->target);
     if (!shouldBeTrue(!!target, curr, "call target must exist")) return;
     if (!shouldBeTrue(curr->operands.size() == target->params.size(), curr, "call param number must match")) return;
     for (size_t i = 0; i < curr->operands.size(); i++) {
@@ -219,10 +235,10 @@ public:
   }
   void visitCallImport(CallImport *curr) {
     if (!validateGlobally) return;
-    auto* import = getModule()->checkImport(curr->target);
+    auto* import = getModule()->getImportOrNull(curr->target);
     if (!shouldBeTrue(!!import, curr, "call_import target must exist")) return;
-    if (!shouldBeTrue(import->functionType, curr, "called import must be function")) return;
-    auto* type = import->functionType;
+    if (!shouldBeTrue(!!import->functionType.is(), curr, "called import must be function")) return;
+    auto* type = getModule()->getFunctionType(import->functionType);
     if (!shouldBeTrue(curr->operands.size() == type->params.size(), curr, "call param number must match")) return;
     for (size_t i = 0; i < curr->operands.size(); i++) {
       if (!shouldBeEqualOrFirstIsUnreachable(curr->operands[i]->type, type->params[i], curr, "call param types must match")) {
@@ -232,7 +248,7 @@ public:
   }
   void visitCallIndirect(CallIndirect *curr) {
     if (!validateGlobally) return;
-    auto* type = getModule()->checkFunctionType(curr->fullType);
+    auto* type = getModule()->getFunctionTypeOrNull(curr->fullType);
     if (!shouldBeTrue(!!type, curr, "call_indirect type must exist")) return;
     shouldBeEqualOrFirstIsUnreachable(curr->target->type, i32, curr, "indirect call target must be an i32");
     if (!shouldBeTrue(curr->operands.size() == type->params.size(), curr, "call param number must match")) return;
@@ -378,8 +394,9 @@ public:
     if (!validateGlobally) return;
     if (curr->kind == ExternalKind::Function) {
       if (validateWeb) {
-        shouldBeUnequal(curr->functionType->result, i64, curr->name, "Imported function must not have i64 return type");
-        for (WasmType param : curr->functionType->params) {
+        auto* functionType = getModule()->getFunctionType(curr->functionType);
+        shouldBeUnequal(functionType->result, i64, curr->name, "Imported function must not have i64 return type");
+        for (WasmType param : functionType->params) {
           shouldBeUnequal(param, i64, curr->name, "Imported function must not have i64 parameters");
         }
       }
@@ -409,7 +426,9 @@ public:
     if (!validateGlobally) return;
     shouldBeTrue(curr->init != nullptr, curr->name, "global init must be non-null");
     shouldBeTrue(curr->init->is<Const>() || curr->init->is<GetGlobal>(), curr->name, "global init must be valid");
-    shouldBeEqual(curr->type, curr->init->type, nullptr, "global init must have correct type");
+    if (!shouldBeEqual(curr->type, curr->init->type, curr->init, "global init must have correct type")) {
+      std::cerr << "(on global " << curr->name << '\n';
+    }
   }
 
   void visitFunction(Function *curr) {
@@ -471,7 +490,7 @@ public:
         }
         shouldBeTrue(found, name, "module function exports must be found");
       } else if (exp->kind == ExternalKind::Global) {
-        shouldBeTrue(curr->checkGlobal(name), name, "module global exports must be found");
+        shouldBeTrue(curr->getGlobalOrNull(name), name, "module global exports must be found");
       } else if (exp->kind == ExternalKind::Table) {
         shouldBeTrue(name == Name("0") || name == curr->table.name, name, "module table exports must be found");
       } else if (exp->kind == ExternalKind::Memory) {
@@ -485,7 +504,7 @@ public:
     }
     // start
     if (curr->start.is()) {
-      auto func = curr->checkFunction(curr->start);
+      auto func = curr->getFunctionOrNull(curr->start);
       if (shouldBeTrue(func != nullptr, curr->start, "start must be found")) {
         shouldBeTrue(func->params.size() == 0, curr, "start must have 0 params");
         shouldBeTrue(func->result == none, curr, "start must not return a value");
@@ -494,7 +513,7 @@ public:
   }
 
   void doWalkFunction(Function* func) {
-    PostWalker<WasmValidator, Visitor<WasmValidator>>::doWalkFunction(func);
+    PostWalker<WasmValidator>::doWalkFunction(func);
   }
 
 private:
